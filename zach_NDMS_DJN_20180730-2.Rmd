@@ -1,0 +1,203 @@
+---
+title: "Zach NDMS"
+author: "Daniel J. Naumenko"
+date: "July 30, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Zach notes:
+Alright so this is 16s data from a series of "incubation vessels". The water in those were either filtered or unfiltered and the species of Crustose Coraline Algae inside were also different. So I am essentially trying to figure out what the effect of the treatments are on the communities.
+
+Good luck.
+
+```{r Libraries, message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+
+# import libraries
+
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(MASS)
+library(vegan)
+```
+
+I made minor manual edits to the column names in the original csv file. It was easier to add underscores in spaces between some column names (and in one case replace parentheses with underscores) to avoid issues with standard R naming conventions.
+```{r Data import, message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+
+# read in data
+microb_NT <- read.csv("CRUSADE_OTUS_Master_Cleaned.csv")
+
+#transform data arc(sqrt())
+microb_df <- microb_NT%>%
+  mutate_if(is.numeric, sqrt)%>%
+  mutate_if(is.numeric, asin)
+
+# edit column names to contain no spaces
+microb_abun <- microb_df %>% 
+  mutate()%>%
+  dplyr::filter(Timepoint == "T3") %>% 
+  dplyr::filter(!Organism == "Water Control")%>%
+  dplyr::select(`Label`:`Verrucomicrobiales_Verrucomicrobiaceae_Roseibacillus.sp`)
+
+# remove original dataframe
+rm(microb_df)
+
+```
+
+Ok, so the only columns that are required for NDMS calculations are Alteromonadales_Alteromonadaceae_Alteromonas_sp:Flavobacteriales_Flavobacteriaceae_Cytophaga_sp_41-DBG2_sp. I am following methods of Jari Oksanen in "Multivariate Analysis of Ecological Communities in R: vegal tutorial. June 10, 2015", secion 2.1: NDMS
+
+NDMS can be performed with isoMDS(), but requires dissimilarities as input. Bray-Curtis dissimilarity is the default (also known as Steinhaus dissimularity, or the Sorensen index in Finland).
+
+
+```{r eval=FALSE, fig.cap="The stressplot function draws a Shepard plot where ordination distances are plotted against community dissimilarities (using Bray-Curtis dissimilarity as default, see above). Also shows two correlation-like goodness of fit statistics. The non-metric fit is based on Stress (1-stress^2) where Stress is a function of and non-linear monotone transformation of observed dissimilarities and ordination distances. The fit-based Rsq: is correlation between the fitted values and ordination distances.", message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+
+stressplot(vare.mds0, vare.dis)
+```
+
+
+
+
+```{r}
+
+
+# create community x species matrix
+microb <- as.matrix(microb_abun %>% 
+                      dplyr::select(`Subgroup_3_PAUC26f`:`Verrucomicrobiales_Verrucomicrobiaceae_Roseibacillus.sp`),
+                          dimnames = list(paste("Sample", 1:31, sep = ",")))
+
+# Run NmDS, provide community x species matrix, and set dimensions to 2
+# outputs each iteration until a solution is reached (minimize stress after reconfiguration of points in 2D)
+
+set.seed(1234)
+microb_NMDS <- metaMDS(microb, k = 2)
+
+# produce Shepard plot
+# large scatter around the line suggests that original dissimilarities are not well preserved in the reduced number of dimensions. These look pretty good!
+stressplot(microb_NMDS)
+
+# plot the NMDS
+# open circles are communities, red crosses are species
+plot(microb_NMDS)
+
+ordiplot(microb_NMDS, type = "n")
+orditorp(microb_NMDS, display = "sites", air = 0.25)
+
+
+
+# create a plot with convex hulls connecting vertices of the points made by a treatment
+
+treatment <- c(microb_abun$Water.Treatment)
+samples <- c(microb_abun$Label)
+
+ordiplot(microb_NMDS, type = "n",
+         main = "NMDS of Incubation Vessels")
+ordihull(microb_NMDS, groups = treatment, draw = "polygon", label = F)
+#orditorp(microb_NMDS, display = "sites", labels = samples, air = 0.05)
+orditorp(microb_NMDS, display = "sites", air = 0.2)
+
+
+# spider plot
+ordiplot(microb_NMDS, type = "n",
+         main = "NMDS of Incubation Vessels")
+orditorp(microb_NMDS, display = "sites", air = 0.2)
+ordispider(microb_NMDS, groups = treatment)
+
+
+# ellipse plot
+ordiplot(microb_NMDS, type = "n",
+         main = "NMDS of Incubation Vessels")
+orditorp(microb_NMDS, display = "sites", air = 0.2)
+ordiellipse(microb_NMDS, groups = treatment)
+
+
+
+# MST plot
+
+dist_microb <- vegdist(microb)
+clust_microb <- hclust(dist_microb, method = "complete")
+
+
+ordiplot(microb_NMDS, type = "n",
+         main = "NMDS of Incubation Vessels")
+orditorp(microb_NMDS, display = "sites", air = 0.2)
+ordicluster(microb_NMDS, cluster = clust_microb)
+
+
+
+```
+
+
+```{r}
+# plot NMDS output in ggplot
+
+df.scores <- as.data.frame(scores(microb_NMDS)) #Using the scores function from vegan to extract the site scores and convert to a data.frame
+
+df.scores$site <- rownames(df.scores) # create a column of site names, from the rownames of data.scores
+
+# add grouping variables
+df.scores$sample <- microb_abun$Label
+df.scores$group <- microb_abun$Water.Treatment
+df.scores$dendolabel <- microb_abun$Dendolabel
+df.scores$DNA_source <- microb_abun$DNA.Source
+df.scores$Organism <- microb_abun$Organism
+
+
+species.scores <- as.data.frame(scores(microb_NMDS, "species")) #Using the scores function from vegan to extract the species scores and convert to a data.frame
+
+species.scores$species <- rownames(species.scores)
+
+
+
+# plot NMDS
+
+ggplot() +
+  geom_point(data = df.scores, aes(x = NMDS1, y = NMDS2, shape = group), alpha = 0.5) +
+  geom_text(data = df.scores, aes(x = NMDS1, y = NMDS2, label = site)) +
+  coord_equal() +
+  scale_shape_manual(values = c(0, 19)) +
+  theme_bw()
+
+
+
+# plot with convex group hulls
+
+grp.filter <- df.scores[df.scores$group == "Filtered",][chull(df.scores[df.scores$group == "Filtered", c("NMDS1", "NMDS2")]), ] # hull values for filtered group
+
+grp.unfilter <- df.scores[df.scores$group == "Unfiltered",][chull(df.scores[df.scores$group == "Unfiltered", c("NMDS1", "NMDS2")]), ] # hull values for unfiltered group
+
+hull.data <- rbind(grp.filter, grp.unfilter)
+
+
+ggplot() +
+  geom_polygon(data = hull.data, aes(x = NMDS1, y = NMDS2, fill = group, group = group), alpha = 0.3) +
+  geom_text(data = species.scores, aes(x = NMDS1, y = NMDS2, label = species),
+            alpha = 0.5) +
+  geom_point(data = df.scores, aes(x = NMDS1, y = NMDS2, shape = group, colour = group), size = 3) +
+  geom_text(data = df.scores, aes(x = NMDS1, y = NMDS2, label = site)) +
+  coord_equal() +
+  theme_bw()
+```
+
+
+
+```{r eval=FALSE, include=FALSE}
+
+# write csv for Zach to plot in JMP
+NMDS_scores <- as.data.frame(scores(microb_NMDS, display = c("sites")))
+
+
+# add grouping variables
+NMDS_scores$Sample <- microb_abun$Label
+NMDS_scores$Water_Treatment <- microb_abun$Water.Treatment
+NMDS_scores$DNA_source <- microb_abun$DNA.Source
+NMDS_scores$Organism <- microb_abun$Organism
+
+
+
+write.csv(NMDS_scores, "NMDS_scores.csv")
+```
+

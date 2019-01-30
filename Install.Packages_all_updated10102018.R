@@ -1,0 +1,36 @@
+install.packages(c("tidyverse", 
+                   "ggplot2", 
+                   "vegan", 
+                   "ape", 
+                   "FactoMineR",
+                   "factoextra", 
+                   "Mass", 
+                   "janitor",
+                   "devtools",
+                   "data.table",
+                   "magrittr",
+                   "reshape2",
+                   "DescTools",
+                   "schoolmath",
+                   "cluster",
+                   "binom",
+                   "epitools",
+                   "car",
+                   "multcomp",
+                   "rfPermute",
+                   "ggtern",
+                   "stringi",
+                   "psych",
+                   "nortest",
+                   "reshape2",
+                   "RColorBrewer",
+                   "ggfortify",
+                   "ggmap",
+                   "dunn.test"))
+library(devtools)
+install_github('fawda123/ggord')
+install_github("ggbiplot", "vqv")
+install_github("tidyverse/purrr")
+
+source('http://bioconductor.org/biocLite.R')
+biocLite('phyloseq')
