@@ -46,8 +46,8 @@ ls_df <- left_join(colton_meta, ls_tran, by = "Sample")
 
 #making abundance only matrix and saving columns with names/metadata into dinames
 microb_f <- as.data.frame(ls_df %>%
-                        dplyr::select(-c(Sample:Year)),
-                      dinames = list(paste("", 1:43, sep = ",")))
+                            dplyr::select(-c(Sample:Year)),
+                          dinames = list(paste("", 1:43, sep = ",")))
 
 veg_bray <- vegdist(microb_f, "bray") #Bray-curtis distances
 
@@ -81,7 +81,7 @@ write_csv(pco_scores, "colton_ls_pcoa.dat")
 
 
 # PERMANOVA ---------------------------------------------------------------
-adonis(microb_f ~ Year, ls_wdf, perm=1000, method="bray", set.seed(100))
+adonis(microb_f ~ Location*Group, ls_wdf, perm=1000, method="bray", set.seed(100))
 
 
 # ANOVA -------------------------------------------------------------------
