@@ -17,4 +17,13 @@ Irina_yes <- Irina_fixed%>%
   dplyr::select(-c(newcolumn))
 
 Irina_important <- Irina_yes%>%
-  dplyr::filter()
+  dplyr::filter(RF_Group1_Top500 =="important")
+
+Irina_others <-Irina_yes%>%
+  dplyr::filter(!RF_Group1_Top500 =="important")
+
+
+Irina_fixed$no <- sapply(Irina_fixed$Count, function(x) x-1000)
+
+
+bind_rows(Irina_others, Irina_important)
