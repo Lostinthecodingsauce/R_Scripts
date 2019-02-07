@@ -10,7 +10,6 @@ library(readr)
 library(magrittr)
 library(DescTools)
 library(reshape2)
-library(ggpubr)
 
 ##color pallette
 library(wesanderson)
@@ -75,17 +74,16 @@ pco_scores$Year <- ls_wdf$Year
 ggplot(pco_scores, mapping = aes(Axis.1, Axis.2, col = ls_wdf$Location, shape = factor(ls_wdf$Year))) +
   geom_point(stat = "identity") +
   scale_color_manual(values=wes_palette(n=4, name="Darjeeling1")) +
-  scale_shape_manual(values = c(0,1,2,3,5))
+  scale_shape_manual(values = c(0,1,2,3,5,7))
 
 write_csv(pco_scores, "colton_ls_pcoa.dat")
 
 
 # PERMANOVA ---------------------------------------------------------------
-adonis(microb_f ~ Location*Group, ls_wdf, perm=1000, method="bray", set.seed(100))
+adonis(microb_f ~ Location*Group, ls_df, perm=1000, method="bray", set.seed(100))
 
 
 # ANOVA -------------------------------------------------------------------
-ls_df[is.nan(ls_df)] <-  0
 ls_df[is.na(ls_df)] <- 0
 
 ls_wdf <-as.data.frame(ls_df)
