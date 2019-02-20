@@ -428,7 +428,7 @@ HR_filt_pie <- HR_filt_ggp + coord_polar("y", start = 0)
 HR_CCA_pie <- PO_CCA_ggp + coord_polar("y", start = 0)
 
 ## To visualize, uncomment the next line
-# PO_filt_pie
+PO_filt_pie
 # HR_filt_pie
 
 #Saving Pie Charts as pdfs to wd

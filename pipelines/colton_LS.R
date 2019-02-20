@@ -78,7 +78,6 @@ ggplot(pco_scores, mapping = aes(Axis.1, Axis.2, col = ls_wdf$Location, shape = 
 
 write_csv(pco_scores, "colton_ls_pcoa.dat")
 
-
 # PERMANOVA ---------------------------------------------------------------
 adonis(microb_f ~ Location*Group, ls_df, perm=1000, method="bray", set.seed(100))
 
