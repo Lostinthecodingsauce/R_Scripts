@@ -47,7 +47,7 @@ samples$sample_ID <- gsub("% of Total\\(", "", samples$sample_ID)
 samples$sample_ID <- gsub(")", "", samples$sample_ID)
 
 # renaming columns and row metadata
-moorea_wdf <-samples%>%
+moorea_all <-samples%>%
   separate(sample_ID, c("Experiment", "Organism", "Replicate", "Timepoint", "DOM_source"), sep = "_")%>%
   filter(!Experiment %like% "Blank")%>%
   filter(!Experiment == "SE",
@@ -76,7 +76,8 @@ moorea_wdf <-samples%>%
                                      Organism == "WA" ~ "Water control",
                                      TRUE ~ as.character(Organism)))
 
-moorea_wdf <- apply(moorea_wdf[6:10031], 2, function(x) gsub("%", "", x))
+moorea_list <- sapply(moorea_all[6:10031], function(x) gsub("%", "", x))
+
 # moorea_wdf$Organismal_clade <- moorea_wdf$Organism
 # 
 # moorea_wdf <- moorea_wdf%>%
