@@ -46,8 +46,22 @@ samples$sample_ID <- gsub("-", "_", samples$sample_ID)
 samples$sample_ID <- gsub("% of Total\\(", "", samples$sample_ID)
 samples$sample_ID <- gsub(")", "", samples$sample_ID)
 
-# renaming columns and row metadata
-moorea_all <-samples%>%
+##Converts all RA columns to numeric and percentages
+moorea_list <- sapply(samples[2:10027], function(x) as.numeric(gsub("%", "", x))/100)
+moorea_percentages <-as.data.frame(moorea_list)
+
+#Transforms RA columns to asin(sqrt)
+moorea_asin_sqrt_list <- sapply(moorea_percentages, function(x) asin(sqrt(x)))
+moorea_asin_sqrt <- as.data.frame(moorea_asin_sqrt_list)
+
+#Data matrix with both RA and asin(sqrt(asin)) data
+moorea_asin_samples <- cbind("sample_ID" = samples$sample_ID, moorea_asin_sqrt)
+moorea_percent_samples <- cbind("sample_ID" = samples$sample_ID, moorea_percentages)
+moorea_percent_transformed <- full_join(moorea_percent_samples, moorea_asin_samples, by = "sample_ID",  suffix = c(".RA", ".asin(sqrt)"))
+
+## renaming columns and row metadata
+## from here on columns 6:10031 are RA and 10032:20053 are transformed
+moorea_wdf <-moorea_percent_transformed%>%
   separate(sample_ID, c("Experiment", "Organism", "Replicate", "Timepoint", "DOM_source"), sep = "_")%>%
   filter(!Experiment %like% "Blank")%>%
   filter(!Experiment == "SE",
@@ -76,7 +90,6 @@ moorea_all <-samples%>%
                                      Organism == "WA" ~ "Water control",
                                      TRUE ~ as.character(Organism)))
 
-moorea_list <- sapply(moorea_all[6:10031], function(x) gsub("%", "", x))
 
 # moorea_wdf$Organismal_clade <- moorea_wdf$Organism
 # 
@@ -117,18 +130,31 @@ dorcierr_wdf <- dorcierr%>%
   separate(Timepoint, c("Timepoint", "DayNight"), sep = -1)%>%
   mutate(DayNight = case_when(DayNight == "D" ~ "Day",
                               TRUE ~ "Night"))
+# If low on memory. run the lines below: 
+# write_csv(dorcierr_wdf, "dorcier_wdf_lowmemory.csv")
+# rm(list = ls())
+# dorcierr_wdf <- read_csv("dorcier_wdf_lowmemory.csv")
 
 dorcierr_final <- dorcierr_wdf%>%
   filter(Timepoint == "TF")
 
 dorcierr_transformations <- dorcierr_wdf%>%
-  gather()
+  select(c(1:10031))%>% 
+  gather(feature_name, RA, 6:10031)%>%
+  spread(Timepoint, RA)
+
+dorcierr_transformations$change <- (dorcierr_transformations$TF - dorcierr_transformations$T0)
+  
+dorcierr_transformed <- dorcierr_transformations%>%
+  select(-c(T0,TF))%>%
+  spread(feature_name, change)
+
 
 # PCoA --------------------------------------------------------------------
 
 #making abundance only matrix and saving columns with names/metadata into dinames
 microb_f <- dorcierr_final%>%
-  select(-c(1:5))
+  select(c(10032:20057))
 
 veg_bray <- vegdist(microb_f, "bray") #Bray-curtis distances
 
@@ -155,7 +181,32 @@ ggplot(pco_scores, mapping = aes(Axis.1, Axis.2, col = dorcierr_final$Organism,
 
 adonis(microb_f ~ Organismal_clade, moorea_wdf_fix, perm=1000, method="bray", set.seed(100))
 
-pairwiseAdonis::pairwise.adonis(microb_f, dorcierr_wdf$Organism, p.adjust.m = "BH")
+pairwiseAdonis::pairwise.adonis(microb_f, dorcierr_final$Organism, p.adjust.m = "BH")
+
+
+# ANOVA -------------------------------------------------------------------
+
+anova_variables <- c("Organism", "DayNight", "Organism*DayNight")
+
+aov_dr <- sapply(dorcierr_transformed[5:10030], function(x) summary(aov(x ~ dorcierr_transformed[["Organism"]]*dorcierr_transformed[["DayNight"]]))[[1]][1:3,'Pr(>F)'])
+
+raw_aov_dr <- sapply(dorcierr_transformed[5:10030], function(x) aov(x ~ dorcierr_transformed[["Organism"]]*dorcierr_transformed[["DayNight"]]))
+# It comes out as a list so it has to be first converted to a data frame before we can add in the test names as a column
+anova_dr <- as.data.frame(aov_dr)
+anova_dr$Anova_test <- cbind(anova_variables)
+
+# Now the data is made Tidy and we filter to only significant values
+anova_dr_tidy <- anova_dr%>%
+  gather(Clade, F_value, 1:10026)%>%
+  filter(F_value, F_value <0.05)
+
+organism_anova <- anova_dr_tidy%>%
+  filter(Anova_test == "Organism")
+
+organism_sig_clades <- c(organism_anova$Clade)
+
+Tukey <- TukeyHSD(raw_aov_dr, "Organism", ordered = FALSE)
+
 # Writing CSVs ------------------------------------------------------------
 
 write_csv(moorea_wdf, "moorea_metab_FeatureID_samples.csv")
