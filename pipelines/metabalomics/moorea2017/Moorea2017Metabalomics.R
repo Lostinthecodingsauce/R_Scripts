@@ -7,6 +7,7 @@ rm(list = ls())
 library(tidyverse)
 library(data.table)
 library(DescTools)
+library(broom)
 
 #PCoA, PERMANOVA
 library(vegan)
@@ -16,14 +17,13 @@ library(RColorBrewer)
 
 # Loading in Data and Joining Tables ---------------------------------------------------------
 
-
-analog_hits <- read_tsv("Analog_hits.tsv")%>%
+analog_hits <- readxl::read_excel("Analog_hits.xlsx")%>%
   rename(Scan_Number = 'Scan_analog')
-true_hits <-read_tsv("library_hits_true.tsv")%>%
+true_hits <- readxl::read_excel("library_hits_true.xlsx")%>%
   rename(Scan_Number = 'Scan')
-old_hits <- read_csv("Moorea_SPEDOM_MSMS_Polished_April2018.csv")%>%
+old_hits <- readxl::read_excel("Moorea_SPEDOM_MSMS_Polished_April2018 (Autosaved).xlsx")%>%
   rename(Scan_Number = 'row ID')
-Node_info <- read_tsv("Node_Info.clustersummary.tsv")
+Node_info <- readxl::read_excel("Node_Info.clustersummary.xlsx")
 
 ## Joining tables
 
@@ -34,6 +34,10 @@ both_runs <- full_join(new_run, old_hits, "Scan_Number")
 both_runs_by_old <- right_join(new_run, old_hits, "Scan_Number")
 
 scan_IDs <- as.data.frame(old_hits$Scan_Number)
+
+# Select raw data for Daniels analysis
+raw_samples <- both_runs_by_old%>%
+  select(c('Feature_Name':'D_Blank_DI'))
 
 # Transposing and selecting only sample data
 samples <- both_runs_by_old%>%
@@ -188,7 +192,8 @@ pairwiseAdonis::pairwise.adonis(microb_f, dorcierr_final$Organism, p.adjust.m = 
 
 anova_variables <- c("Organism", "DayNight", "Organism*DayNight")
 
-aov_dr <- sapply(dorcierr_transformed[5:10030], function(x) summary(aov(x ~ dorcierr_transformed[["Organism"]]*dorcierr_transformed[["DayNight"]]))[[1]][1:3,'Pr(>F)'])
+aov_dr <- sapply(dorcierr_transformed[5:10030], function(x) summary(
+  aov(x ~ dorcierr_transformed[["Organism"]]*dorcierr_transformed[["DayNight"]]))[[1]][1:3,'Pr(>F)'])
 
 raw_aov_dr <- sapply(dorcierr_transformed[5:10030], function(x) aov(x ~ dorcierr_transformed[["Organism"]]*dorcierr_transformed[["DayNight"]]))
 # It comes out as a list so it has to be first converted to a data frame before we can add in the test names as a column
@@ -205,8 +210,10 @@ organism_anova <- anova_dr_tidy%>%
 
 organism_sig_clades <- c(organism_anova$Clade)
 
-Tukey <- TukeyHSD(raw_aov_dr, "Organism", ordered = FALSE)
+Tukey <- sapply(dorcierr_transformed[5:10030], function(x) TukeyHSD(
+  aov(x ~ dorcierr_transformed[["Organism"]]*dorcierr_transformed[["DayNight"]])))
 
+tukey_sig <- as.data.frame(tidy(Tukey))
 # Writing CSVs ------------------------------------------------------------
 
 write_csv(moorea_wdf, "moorea_metab_FeatureID_samples.csv")
