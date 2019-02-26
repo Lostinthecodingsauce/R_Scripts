@@ -37,7 +37,7 @@ scan_IDs <- as.data.frame(old_hits$Scan_Number)
 
 # Select raw data for Daniels analysis
 raw_samples <- both_runs_by_old%>%
-  select(c('Feature_Name':'D_Blank_DI'))
+  select(c('Feature_Name','% of Total(D_WA_1_T0D)':'% of Total(D_Blank_DI)'))
 
 # Transposing and selecting only sample data
 samples <- both_runs_by_old%>%
@@ -51,16 +51,16 @@ samples$sample_ID <- gsub("% of Total\\(", "", samples$sample_ID)
 samples$sample_ID <- gsub(")", "", samples$sample_ID)
 
 ##Converts all RA columns to numeric and percentages
-moorea_list <- sapply(samples[2:10027], function(x) as.numeric(gsub("%", "", x))/100)
-moorea_percentages <-as.data.frame(moorea_list)
+moorea_percentages <- as.data.frame(sapply(samples[2:10027], function(x) as.numeric(gsub("%", "", x))/100))
 
 #Transforms RA columns to asin(sqrt)
-moorea_asin_sqrt_list <- sapply(moorea_percentages, function(x) asin(sqrt(x)))
-moorea_asin_sqrt <- as.data.frame(moorea_asin_sqrt_list)
+moorea_asin_sqrt <- as.data.frame(sapply(moorea_percentages, function(x) asin(sqrt(x))))
 
 #Data matrix with both RA and asin(sqrt(asin)) data
-moorea_asin_samples <- cbind("sample_ID" = samples$sample_ID, moorea_asin_sqrt)
-moorea_percent_samples <- cbind("sample_ID" = samples$sample_ID, moorea_percentages)
+moorea_asin_samples <- moorea_asin_sqrt%>%
+  add_column("sample_ID" = samples$sample_ID, .before = 1)
+moorea_percent_samples <- moorea_percentages%>%
+  add_column("sample_ID" = samples$sample_ID, .before = 1)
 moorea_percent_transformed <- full_join(moorea_percent_samples, moorea_asin_samples, by = "sample_ID",  suffix = c(".RA", ".asin(sqrt)"))
 
 ## renaming columns and row metadata
@@ -142,14 +142,27 @@ dorcierr_wdf <- dorcierr%>%
 dorcierr_final <- dorcierr_wdf%>%
   filter(Timepoint == "TF")
 
+## Need to take the mean of T0 to subtract from TF because of the differences in replicate #
 dorcierr_transformations <- dorcierr_wdf%>%
   select(c(1:10031))%>% 
   gather(feature_name, RA, 6:10031)%>%
   spread(Timepoint, RA)
 
-dorcierr_transformations$change <- (dorcierr_transformations$TF - dorcierr_transformations$T0)
+dorcierr_t0 <- dorcierr_transformations%>%
+  select(-c(TF))%>%
+  filter(!Replicate == 3,
+         !Replicate == 4)%>%
+  group_by(Organism, DayNight, feature_name)%>%
+  summarize_if(is.numeric, mean)
+
+dorcierr_newt0 <- left_join(dorcierr_transformations, dorcierr_t0, by = c("Organism", "DayNight", "feature_name"))%>%
+  select(-c(T0.x, Replicate.y))%>%
+  rename(Replicate = 'Replicate.x',
+         T0 = 'T0.y')
+
+dorcierr_newt0$change <- (dorcierr_newt0$TF - dorcierr_newt0$T0)
   
-dorcierr_transformed <- dorcierr_transformations%>%
+dorcierr_transformed <- dorcierr_newt0%>%
   select(-c(T0,TF))%>%
   spread(feature_name, change)
 
@@ -157,8 +170,8 @@ dorcierr_transformed <- dorcierr_transformations%>%
 # PCoA --------------------------------------------------------------------
 
 #making abundance only matrix and saving columns with names/metadata into dinames
-microb_f <- dorcierr_final%>%
-  select(c(10032:20057))
+microb_f <- dorcierr_transformed%>%
+  select(c(5:10030))
 
 veg_bray <- vegdist(microb_f, "bray") #Bray-curtis distances
 
@@ -188,32 +201,69 @@ adonis(microb_f ~ Organismal_clade, moorea_wdf_fix, perm=1000, method="bray", se
 pairwiseAdonis::pairwise.adonis(microb_f, dorcierr_final$Organism, p.adjust.m = "BH")
 
 
-# ANOVA -------------------------------------------------------------------
+# ANOVA and Post-Hoc -------------------------------------------------------------------
 
 anova_variables <- c("Organism", "DayNight", "Organism*DayNight")
 
-aov_dr <- sapply(dorcierr_transformed[5:10030], function(x) summary(
-  aov(x ~ dorcierr_transformed[["Organism"]]*dorcierr_transformed[["DayNight"]]))[[1]][1:3,'Pr(>F)'])
+two_way_model <- sapply(dorcierr_transformed[5:10030], function(x) aov(x ~ dorcierr_transformed[["Organism"]]*dorcierr_transformed[["DayNight"]]))
 
-raw_aov_dr <- sapply(dorcierr_transformed[5:10030], function(x) aov(x ~ dorcierr_transformed[["Organism"]]*dorcierr_transformed[["DayNight"]]))
-# It comes out as a list so it has to be first converted to a data frame before we can add in the test names as a column
-anova_dr <- as.data.frame(aov_dr)
-anova_dr$Anova_test <- cbind(anova_variables)
+p_values <- as.data.frame(sapply(dorcierr_transformed[5:10030], function(x) summary(
+  aov(x ~ dorcierr_transformed[["Organism"]]*dorcierr_transformed[["DayNight"]]))[[1]][1:3,'Pr(>F)']))
+
+# Add test names as the first column
+anova_p_values <- p_values%>%
+  add_column(anova_variables, .before = 1)
 
 # Now the data is made Tidy and we filter to only significant values
-anova_dr_tidy <- anova_dr%>%
-  gather(Clade, F_value, 1:10026)%>%
+anova_dr_tidy <- anova_p_values%>%
+  gather(Clade, F_value, 2:10027)%>%
   filter(F_value, F_value <0.05)
 
 organism_anova <- anova_dr_tidy%>%
-  filter(Anova_test == "Organism")
+  filter(anova_variables == "Organism")
 
-organism_sig_clades <- c(organism_anova$Clade)
+organism_sig_clades <- as.vector(organism_anova$Clade)
 
 Tukey <- sapply(dorcierr_transformed[5:10030], function(x) TukeyHSD(
   aov(x ~ dorcierr_transformed[["Organism"]]*dorcierr_transformed[["DayNight"]])))
 
-tukey_sig <- as.data.frame(tidy(Tukey))
+tukey_sig <- as.data.frame(Tukey)
+
+## Tukey Organism
+tukey_organism <- tukey_sig%>%
+  rownames_to_column(var = "Anova_test")%>%
+  filter(Anova_test == 'dorcierr_transformed[["Organism"]]')%>%
+  select(-1)%>%
+  gather(feature_name, p_value, 1:ncol(tukey_sig))%>%
+  filter(feature_name %in% c(organism_sig_clades))
+
+tukey_organism$p_value <-  tukey_organism$p_value%>%
+  gsub("c\\(", "", .)%>%
+  gsub(")", "", .)
+
+tukey_organism_ps <- tukey_organism%>%
+  separate(p_value, paste("c", 1:60, sep = "."), sep = ",")
+
+
+# Finding Largest "Player"  ---------------------------------------------------
+
+dorcierr_template_day <- dorcierr_transformed%>%
+  gather(feature_name, RA, 5:ncol(dorcierr_transformed))%>%
+  filter(feature_name %in% c(organism_sig_clades))%>%
+  filter(DayNight == "Day")%>%
+  select(-c(Experiment, DayNight, Replicate))%>%
+  mutate(RA = as.numeric(RA))
+
+dorcierr_means <- dorcierr_template_day%>%
+  group_by(Organism, feature_name)%>%
+  summarize_if(is.numeric, mean)%>%
+  spread(Organism, RA)%>%
+  group_by(feature_name)
+
+dorcierr_means$max <- apply(dorcierr_means[2:7], 1, max)
+
+
+
 # Writing CSVs ------------------------------------------------------------
 
 write_csv(moorea_wdf, "moorea_metab_FeatureID_samples.csv")
