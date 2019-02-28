@@ -8,6 +8,7 @@ library(tidyverse)
 library(data.table)
 library(DescTools)
 library(broom)
+library(PMCMRplus)
 
 #PCoA, PERMANOVA
 library(vegan)
@@ -35,33 +36,43 @@ both_runs_by_old <- right_join(new_run, old_hits, "Scan_Number")
 
 scan_IDs <- as.data.frame(old_hits$Scan_Number)
 
-# Select raw data for Daniels analysis
-raw_samples <- both_runs_by_old%>%
-  select(c('Feature_Name','% of Total(D_WA_1_T0D)':'% of Total(D_Blank_DI)'))
+
+# Designing tables for future analyses ------------------------------------
+
+# Select Feature name and Network it came from
+network <- both_runs_by_old%>%
+  select(c(Feature_Name,`componentindex`, `Compound_Name_analog`, `LibraryID`))%>%
+  rename(feature_name = `Feature_Name`,
+         cluster = `componentindex`,
+         compound = `Compound_Name_analog`)
 
 # Transposing and selecting only sample data
-samples <- both_runs_by_old%>%
-  select(c('Feature_Name', '% of Total(D_WA_1_T0D)':'% of Total(R_TR_3_TFN)'))%>%
+sample_raw <- both_runs_by_old%>%
+  select(c('Feature_Name', '% of Total(D_WA_1_T0D)':'% of Total(R_TR_3_TFN)'))
+
+sample_percentages <- as.data.frame(sapply(sample_raw[2:ncol(sample_raw)], function(x) as.numeric(gsub("%", "", x))/100))%>%
+  add_column(Feature_Name = sample_raw$Feature_Name, .before = 1)
+
+samples <- sample_percentages%>%
+  add_column(max = apply(sample_raw[2:ncol(sample_raw)],1,max))%>%
+  filter(max, max > 0.0001)%>%
+  select(-"max")%>%
   gather(sample_ID, RA, 2:278)%>%
   spread(Feature_Name, RA)
 
 # Some Samples had - instead of _
-samples$sample_ID <- gsub("-", "_", samples$sample_ID)
-samples$sample_ID <- gsub("% of Total\\(", "", samples$sample_ID)
-samples$sample_ID <- gsub(")", "", samples$sample_ID)
-
-##Converts all RA columns to numeric and percentages
-moorea_percentages <- as.data.frame(sapply(samples[2:10027], function(x) as.numeric(gsub("%", "", x))/100))
+samples$sample_ID <- samples$sample_ID%>%
+  gsub("-", "_", .)%>%
+  gsub("% of Total\\(", "", .)%>%
+  gsub(")", "", .)
 
 #Transforms RA columns to asin(sqrt)
-moorea_asin_sqrt <- as.data.frame(sapply(moorea_percentages, function(x) asin(sqrt(x))))
+moorea_asin_sqrt <- as.data.frame(sapply(samples[2:ncol(samples)], function(x) asin(sqrt(x))))
 
 #Data matrix with both RA and asin(sqrt(asin)) data
 moorea_asin_samples <- moorea_asin_sqrt%>%
   add_column("sample_ID" = samples$sample_ID, .before = 1)
-moorea_percent_samples <- moorea_percentages%>%
-  add_column("sample_ID" = samples$sample_ID, .before = 1)
-moorea_percent_transformed <- full_join(moorea_percent_samples, moorea_asin_samples, by = "sample_ID",  suffix = c(".RA", ".asin(sqrt)"))
+moorea_percent_transformed <- full_join(samples, moorea_asin_samples, by = "sample_ID",  suffix = c(".RA", ".asin(sqrt)"))
 
 ## renaming columns and row metadata
 ## from here on columns 6:10031 are RA and 10032:20053 are transformed
@@ -144,8 +155,8 @@ dorcierr_final <- dorcierr_wdf%>%
 
 ## Need to take the mean of T0 to subtract from TF because of the differences in replicate #
 dorcierr_transformations <- dorcierr_wdf%>%
-  select(c(1:10031))%>% 
-  gather(feature_name, RA, 6:10031)%>%
+  select(c(1:8858))%>% 
+  gather(feature_name, RA, 6:8858)%>%
   spread(Timepoint, RA)
 
 dorcierr_t0 <- dorcierr_transformations%>%
@@ -156,9 +167,8 @@ dorcierr_t0 <- dorcierr_transformations%>%
   summarize_if(is.numeric, mean)
 
 dorcierr_newt0 <- left_join(dorcierr_transformations, dorcierr_t0, by = c("Organism", "DayNight", "feature_name"))%>%
-  select(-c(T0.x, Replicate.y))%>%
-  rename(Replicate = 'Replicate.x',
-         T0 = 'T0.y')
+  select(-c(T0.x))%>%
+  rename(T0 = 'T0.y')
 
 dorcierr_newt0$change <- (dorcierr_newt0$TF - dorcierr_newt0$T0)
   
@@ -166,12 +176,13 @@ dorcierr_transformed <- dorcierr_newt0%>%
   select(-c(T0,TF))%>%
   spread(feature_name, change)
 
-
+dorcierr_day_transformed <- dorcierr_transformed%>%
+  filter(DayNight == "Day")
 # PCoA --------------------------------------------------------------------
 
 #making abundance only matrix and saving columns with names/metadata into dinames
-microb_f <- dorcierr_transformed%>%
-  select(c(5:10030))
+microb_f <- dorcierr_final%>%
+  select(c(10032:ncol(dorcierr_final)))
 
 veg_bray <- vegdist(microb_f, "bray") #Bray-curtis distances
 
@@ -188,11 +199,95 @@ text(x = Eigan, y = pc_scores$values$Relative_eig[1:10], label = pc_scores$value
 # Plot using ggplot2
 pco_scores <- as.data.frame(pc_scores$vectors)
 
-ggplot(pco_scores, mapping = aes(Axis.1, Axis.2, col = dorcierr_final$Organism, 
-                                 shape = factor(dorcierr_final$DayNight))) +
+ggplot(pco_scores, mapping = aes(Axis.1, Axis.2, col = dorcierr_wdf$Organism, 
+                                 shape = factor(dorcierr_wdf$DayNight))) +
   geom_point(stat = "identity")+
   scale_shape_manual(values = c(1,19)) +
   scale_color_brewer(type = "qual", palette = 2)
+
+# NMDS --------------------------------------------------------------------
+
+set.seed(1234)
+microb_NMDS <- metaMDS(microb_f)
+
+# produce Shepard plot
+# large scatter around the line suggests that original dissimilarities are not well preserved in the reduced number of dimensions. 
+stressplot(microb_NMDS)
+
+# plot the NMDS
+# open circles are communities, red crosses are species
+plot(microb_NMDS)
+
+ordiplot(microb_NMDS, type = "n")
+orditorp(microb_NMDS, display = "sites", air = 0.25)
+
+
+# create a plot with convex hulls connecting vertices of the points made by a treatment
+
+treatment <- c(microb_f_abun$Organism)
+samples <- c(microb_f_abun$Label)
+##Different Plotting options. Comment in to plot
+
+# ordiplot(microb_NMDS, type = "n",
+#          main = "NMDS of Incubation Vessels")
+# ordihull(microb_NMDS, groups = treatment, draw = "polygon", label = F)
+# #orditorp(microb_NMDS, display = "sites", labels = samples, air = 0.05)
+# orditorp(microb_NMDS, display = "sites", air = 0.2)
+# 
+# 
+# # spider plot
+# ordiplot(microb_NMDS, type = "n",
+#          main = "NMDS of Incubation Vessels")
+# orditorp(microb_NMDS, display = "sites", air = 0.2)
+# ordispider(microb_NMDS, groups = treatment)
+# 
+# 
+# # ellipse plot
+# ordiplot(microb_NMDS, type = "n",
+#          main = "NMDS of Incubation Vessels")
+# orditorp(microb_NMDS, display = "sites", air = 0.2)
+# ordiellipse(microb_NMDS, groups = treatment)
+# 
+# 
+# 
+# # MST plot
+# 
+# dist_microb <- vegdist(microb)
+# clust_microb <- hclust(dist_microb, method = "complete")
+# 
+# 
+# ordiplot(microb_NMDS, type = "n",
+#          main = "NMDS of Incubation Vessels")
+# orditorp(microb_NMDS, display = "sites", air = 0.2)
+# ordicluster(microb_NMDS, cluster = clust_microb)
+
+
+# plot NMDS output in ggplot
+
+df.scores <- as.data.frame(scores(microb_NMDS)) #Using the scores function from vegan to extract the site scores and convert to a data.frame
+
+df.scores$site <- rownames(df.scores) # create a column of site names, from the rownames of data.scores
+
+# add grouping variables
+df.scores$group <- dorcierr_final$Organism
+df.scores$DNA_source <- dorcierr_final$DayNight
+# df.scores$Organism <- dorcierr_final$Timepoint
+
+
+species.scores <- as.data.frame(scores(microb_NMDS, "species")) #Using the scores function from vegan to extract the species scores and convert to a data.frame
+
+species.scores$species <- rownames(species.scores)
+
+
+
+# plot NMDS
+
+ggplot(data = df.scores, mapping = aes(NMDS1, NMDS2, col = dorcierr_final$Organism, 
+                     shape = factor(dorcierr_final$DayNight))) +
+  geom_point() +
+  coord_equal() +
+  scale_shape_manual(values = c(0, 19)) +
+  theme_bw()
 
 # PERMANOVA ---------------------------------------------------------------
 
@@ -200,8 +295,29 @@ adonis(microb_f ~ Organismal_clade, moorea_wdf_fix, perm=1000, method="bray", se
 
 pairwiseAdonis::pairwise.adonis(microb_f, dorcierr_final$Organism, p.adjust.m = "BH")
 
+# One-Way Anova -----------------------------------------------------------
+p_values_oneway <- as.data.frame(sapply(dorcierr_day_transformed[5:ncol(dorcierr_day_transformed)], function(x) summary(
+  aov(x ~ dorcierr_day_transformed[["Organism"]]))[[1]][1,'Pr(>F)']))
 
-# ANOVA and Post-Hoc -------------------------------------------------------------------
+# Now the data is made Tidy and we filter to only significant values
+anova_dr_tidy <- p_values_oneway%>%
+  rownames_to_column(var = "feature_name")%>%
+  rename(f_values = 2)%>%
+  filter(f_values, f_values < 0.05)
+
+oneway_anova_sig <- as.vector(anova_dr_tidy$feature_name)
+
+sigs_only_day <- dorcierr_day_transformed%>%
+  select(c(1:4, oneway_anova_sig))
+
+sigs_only_day$Organism <- as.factor(sigs_only_day$Organism)
+
+dunnets_day <- sapply(sigs_only_day[5:2341], function(x) summary(DunnettTest(x ~ Organism, data = sigs_only_day, control = "Water control")))
+
+
+dunnett_testing <- summary("DunnettTest"(sigs_only_day$`10000_394.1973_3.81_unkown_0.RA`, sigs_only_day$Organism, control = sigs_only_day$`Water control`))
+
+# Two Way-ANOVA and Post-Hoc -------------------------------------------------------------------
 
 anova_variables <- c("Organism", "DayNight", "Organism*DayNight")
 
@@ -244,9 +360,8 @@ tukey_organism$p_value <-  tukey_organism$p_value%>%
 tukey_organism_ps <- tukey_organism%>%
   separate(p_value, paste("c", 1:60, sep = "."), sep = ",")
 
-
 # Finding Largest "Player"  ---------------------------------------------------
-
+## Daytime
 dorcierr_template_day <- dorcierr_transformed%>%
   gather(feature_name, RA, 5:ncol(dorcierr_transformed))%>%
   filter(feature_name %in% c(organism_sig_clades))%>%
@@ -254,14 +369,68 @@ dorcierr_template_day <- dorcierr_transformed%>%
   select(-c(Experiment, DayNight, Replicate))%>%
   mutate(RA = as.numeric(RA))
 
-dorcierr_means <- dorcierr_template_day%>%
+dorcierr_template_day$feature_name <- gsub(".RA", "", dorcierr_template_day$feature_name)
+
+dorcierr_means_day <- dorcierr_template_day%>%
   group_by(Organism, feature_name)%>%
   summarize_if(is.numeric, mean)%>%
   spread(Organism, RA)%>%
   group_by(feature_name)
 
-dorcierr_means$max <- apply(dorcierr_means[2:7], 1, max)
+dorcierr_means_day$max <- apply(dorcierr_means_day[2:7], 1, max)
 
+means_only_day <- dorcierr_means_day%>%
+  ungroup()%>%
+  select(-c(1, max))
+
+dorcierr_means_day$MaxNames <- colnames(means_only_day)[max.col(means_only_day, ties.method="first")]
+
+dorcierr_meanmax_organism_day <- left_join(dorcierr_means_day, network, by = "feature_name")%>%
+  arrange(MaxNames, cluster)%>%
+  filter(!compound == "NA")
+  
+organism_day_neg <- dorcierr_meanmax_organism_day%>%
+  filter(max, max < 0.00)
+
+organism_day_pos <- dorcierr_meanmax_organism_day%>%
+  filter(max, max > 0.00)
+
+## Nighttime
+dorcierr_template_night <- dorcierr_transformed%>%
+  gather(feature_name, RA, 5:ncol(dorcierr_transformed))%>%
+  filter(feature_name %in% c(organism_sig_clades))%>%
+  filter(DayNight == "Night")%>%
+  select(-c(Experiment, DayNight, Replicate))%>%
+  mutate(RA = as.numeric(RA))
+
+dorcierr_template_night$feature_name <- gsub(".RA", "", dorcierr_template_night$feature_name)
+
+dorcierr_means_night <- dorcierr_template_night%>%
+  group_by(Organism, feature_name)%>%
+  summarize_if(is.numeric, mean)%>%
+  spread(Organism, RA)%>%
+  group_by(feature_name)
+
+dorcierr_means_night$max <- apply(dorcierr_means_night[2:7], 1, max)
+
+means_only_night <- dorcierr_means_night%>%
+  ungroup()%>%
+  select(-c(1, max))
+
+dorcierr_means_night$MaxNames <- colnames(means_only_night)[max.col(means_only_night, ties.method="first")]
+
+dorcierr_meanmax_organism_night <- left_join(dorcierr_means_night, network, by = "feature_name")%>%
+  arrange(MaxNames, cluster)%>%
+  filter(!compound == "NA")
+
+organism_night_neg <- dorcierr_meanmax_organism_night%>%
+  filter(max, max < 0.00)
+
+organism_night_pos <- dorcierr_meanmax_organism_night%>%
+  filter(max, max > 0.00)
+
+test <- inner_join(organism_night_pos, organism_day_neg, by = "feature_name", suffix = c(".night", ".day"))%>%
+  select(-c(2:8, 12:18))
 
 
 # Writing CSVs ------------------------------------------------------------
