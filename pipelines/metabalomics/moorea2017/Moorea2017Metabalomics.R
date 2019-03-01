@@ -8,7 +8,6 @@ library(tidyverse)
 library(data.table)
 library(DescTools)
 library(broom)
-library(PMCMRplus)
 
 #PCoA, PERMANOVA
 library(vegan)
@@ -77,6 +76,8 @@ moorea_percent_transformed <- full_join(samples, moorea_asin_samples, by = "samp
 ## renaming columns and row metadata
 ## from here on columns 6:10031 are RA and 10032:20053 are transformed
 moorea_wdf <-moorea_percent_transformed%>%
+  mutate(sample_ID = case_when(sample_ID == "SPIFFy_7_B 2" ~ "SPIFFy_6_B",
+                               TRUE ~ as.character(sample_ID)))%>%
   separate(sample_ID, c("Experiment", "Organism", "Replicate", "Timepoint", "DOM_source"), sep = "_")%>%
   filter(!Experiment %like% "Blank")%>%
   filter(!Experiment == "SE",
@@ -140,6 +141,68 @@ big3 <- moorea_wdf%>%
   filter(!Experiment == "LoRDI",
          !Experiment == "SPIFFy")
 
+ spiffy <- moorea_wdf%>%
+   filter(Experiment == "SPIFFy")%>%
+   dplyr::select(-c("Timepoint", "DOM_source"))
+   
+
+
+# Spiffy workshopping ---------------------------------------------------------
+spiffy_wdf <- spiffy%>%
+   add_column(reef_area = spiffy$Organism, .before = 3)%>%
+   rename(`Site` =`Organism`)%>%
+   mutate(reef_area = case_when(reef_area == 1 ~ "bay",
+                                reef_area == 2 ~ "bay",
+                                reef_area == 3 ~ "bay",
+                                reef_area == 4 ~ "bay",
+                                reef_area == 5 ~ "bay",
+                                reef_area == 6 ~ "backreef",
+                                reef_area == 7 ~ "backreef",
+                                reef_area == 8 ~ "backreef",
+                                reef_area == 9 ~ "backreef",
+                                reef_area == 10 ~ "backreef",
+                                reef_area == 11 ~ "backreef",
+                                reef_area == 12 ~ "backreef",
+                                TRUE ~ "Forereef"))
+
+write_csv(spiffy_wdf, "spiffy_wdf.csv") 
+
+spiffy_no_bay <-spiffy_wdf%>%
+  filter(!reef_area == "bay")
+
+aov_spiffy <- as.data.frame(sapply(spiffy_no_bay[8859:ncol(spiffy_wdf)], function(x) summary(aov(x ~ spiffy_no_bay[["reef_area"]]))[[1]][1,'Pr(>F)']))
+
+anova_spiffy <- aov_spiffy%>%
+  rownames_to_column(var = "feature_name")%>%
+  rename(`f_value`= `sapply(spiffy_wdf[8859:ncol(spiffy_wdf)], function(x) summary(aov(x ~ spiffy_wdf[["reef_area"]]))[[1]][1, "Pr(>F)"])`)
+
+anova_spiffy$FDR_f <- p.adjust(anova_spiffy$f_value, method = "BH")
+
+anova_sigs_spiffy <- anova_spiffy%>%
+  filter(FDR_f, FDR_f < 0.05)
+
+spiffy_sig_names <-as.vector(anova_sigs_spiffy$feature_name)
+
+spiffy_only_sigs <- spiffy_no_bay%>%
+  select(c(1:4, spiffy_sig_names))%>%
+  group_by(reef_area)%>%
+  summarize_if(is.numeric, mean)%>%
+  ungroup()%>%
+  gather(feature_name, RA, 2:422)%>%
+  spread(reef_area, RA)
+
+spiffy_means_only <-spiffy_only_sigs%>%
+  select(-1)
+
+spiffy_only_sigs$MaxNames <- colnames(spiffy_means_only)[max.col(spiffy_means_only, ties.method="first")]
+
+spiffy_only_sigs$max <- apply(spiffy_only_sigs[2:3], 1, max)
+
+spiffy_pvalues_max <- spiffy_only_sigs%>%
+  add_column(f_value = anova_sigs_spiffy$f_value)%>%
+  add_column(FDR_f = anova_sigs_spiffy$FDR_f)
+
+write_csv(spiffy_pvalues_max, "spiffy_significance_byreeflocation.csv")
 # dorcierr further cleaning -----------------------------------------------
 dorcierr_wdf <- dorcierr%>%
   separate(Timepoint, c("Timepoint", "DayNight"), sep = -1)%>%
@@ -178,6 +241,7 @@ dorcierr_transformed <- dorcierr_newt0%>%
 
 dorcierr_day_transformed <- dorcierr_transformed%>%
   filter(DayNight == "Day")
+
 # PCoA --------------------------------------------------------------------
 
 #making abundance only matrix and saving columns with names/metadata into dinames
@@ -312,10 +376,14 @@ sigs_only_day <- dorcierr_day_transformed%>%
 
 sigs_only_day$Organism <- as.factor(sigs_only_day$Organism)
 
-dunnets_day <- sapply(sigs_only_day[5:2341], function(x) summary(DunnettTest(x ~ Organism, data = sigs_only_day, control = "Water control")))
+write_csv(sigs_only_day, "dorcierr_day_forDunnetts.csv")
+
+dunnetts_pvalue <- read_csv("~/Documents/SDSU/Moorea_2017/dorcierr/Stats/dorcierr_day_Dunnetts.csv")
+  
+tukey_pvalue <-read_csv("~/Documents/SDSU/Moorea_2017/dorcierr/Stats/dorcierr_day_Tukey.csv")
 
 
-dunnett_testing <- summary("DunnettTest"(sigs_only_day$`10000_394.1973_3.81_unkown_0.RA`, sigs_only_day$Organism, control = sigs_only_day$`Water control`))
+
 
 # Two Way-ANOVA and Post-Hoc -------------------------------------------------------------------
 
@@ -443,4 +511,3 @@ write_delim(scan_IDs, "Feature_ID.txt", delim = " ", col_names = FALSE)
 write_csv(both_runs_by_old, "new_by_old_AllMeta.csv")
 
 write_csv(dorcierr, "Dorcierr_metab_wdf.csv")
-
