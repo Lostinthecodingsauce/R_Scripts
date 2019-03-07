@@ -1,4 +1,4 @@
-rm(list = ls())
+# rm(list = ls())
 
 
 # Libraries needed --------------------------------------------------------
@@ -22,8 +22,11 @@ analog_hits <- readxl::read_excel("Analog_hits.xlsx")%>%
 true_hits <- readxl::read_excel("library_hits_true.xlsx")%>%
   rename(Scan_Number = 'Scan')
 old_hits <- readxl::read_excel("Moorea_SPEDOM_MSMS_Polished_April2018 (Autosaved).xlsx")%>%
-  rename(Scan_Number = 'row ID')
+  rename(Scan_Number = 'Scan_old')
 Node_info <- readxl::read_excel("Node_Info.clustersummary.xlsx")
+
+Node_check <- left_join(old_hits, Node_info, by = "Scan_Number")%>%
+  select(c('Scan_Number', 'componentindex', 'componentindex_old'))
 
 ## Joining tables
 
@@ -40,9 +43,9 @@ scan_IDs <- as.data.frame(old_hits$Scan_Number)
 
 # Select Feature name and Network it came from
 network <- both_runs_by_old%>%
-  select(c(Feature_Name,`componentindex`, `Compound_Name_analog`, `LibraryID`))%>%
+  select(c(Feature_Name,`componentindex_old`, `Compound_Name_analog`, `LibraryID`))%>%
   rename(feature_name = `Feature_Name`,
-         cluster = `componentindex`,
+         cluster = `componentindex_old`,
          compound = `Compound_Name_analog`)
 
 # Transposing and selecting only sample data
@@ -165,16 +168,15 @@ spiffy_wdf <- spiffy%>%
                                 reef_area == 12 ~ "backreef",
                                 TRUE ~ "Forereef"))
 
-write_csv(spiffy_wdf, "spiffy_wdf.csv") 
 
 spiffy_no_bay <-spiffy_wdf%>%
   filter(!reef_area == "bay")
 
-aov_spiffy <- as.data.frame(sapply(spiffy_no_bay[8859:ncol(spiffy_wdf)], function(x) summary(aov(x ~ spiffy_no_bay[["reef_area"]]))[[1]][1,'Pr(>F)']))
+aov_spiffy <- as.data.frame(sapply(spiffy_no_bay[8859:ncol(spiffy_no_bay)], function(x) summary(aov(x ~ spiffy_no_bay[["reef_area"]]))[[1]][1,'Pr(>F)']))
 
 anova_spiffy <- aov_spiffy%>%
   rownames_to_column(var = "feature_name")%>%
-  rename(`f_value`= `sapply(spiffy_wdf[8859:ncol(spiffy_wdf)], function(x) summary(aov(x ~ spiffy_wdf[["reef_area"]]))[[1]][1, "Pr(>F)"])`)
+  rename(`f_value`= `sapply(spiffy_no_bay[8859:ncol(spiffy_no_bay)], function(x) summary(aov(x ~ spiffy_no_bay[["reef_area"]]))[[1]][1, "Pr(>F)"])`)
 
 anova_spiffy$FDR_f <- p.adjust(anova_spiffy$f_value, method = "BH")
 
@@ -188,7 +190,7 @@ spiffy_only_sigs <- spiffy_no_bay%>%
   group_by(reef_area)%>%
   summarize_if(is.numeric, mean)%>%
   ungroup()%>%
-  gather(feature_name, RA, 2:422)%>%
+  gather(feature_name, RA, 2:332)%>%
   spread(reef_area, RA)
 
 spiffy_means_only <-spiffy_only_sigs%>%
@@ -198,11 +200,45 @@ spiffy_only_sigs$MaxNames <- colnames(spiffy_means_only)[max.col(spiffy_means_on
 
 spiffy_only_sigs$max <- apply(spiffy_only_sigs[2:3], 1, max)
 
-spiffy_pvalues_max <- spiffy_only_sigs%>%
+spiffy_two_locations_pvalues_max <- spiffy_only_sigs%>%
   add_column(f_value = anova_sigs_spiffy$f_value)%>%
-  add_column(FDR_f = anova_sigs_spiffy$FDR_f)
+  add_column(FDR_f = anova_sigs_spiffy$FDR_f)%>%
+  filter(FDR_f, FDR_f < 0.05)
 
-write_csv(spiffy_pvalues_max, "spiffy_significance_byreeflocation.csv")
+spiffy_two_locations_pvalues_max$feature_name <-spiffy_two_locations_pvalues_max$feature_name%>%
+  gsub(".asin\\(sqrt)", "", .)
+
+
+
+spiffy_twolocals_network <- left_join(
+  spiffy_two_locations_pvalues_max, network, by = "feature_name"
+)
+
+
+spiffy_rare <- spiffy_no_bay%>%
+  select(Site, reef_area, 5:8858)%>%
+  unite(site_name, c(Site, reef_area), sep = "_", remove = TRUE)%>%
+  group_by(site_name)%>%
+  summarize_if(is.numeric, mean)%>%
+  gather(feature_name, RA, 2:8855)%>%
+  spread(site_name, RA)%>%
+  add_column(max = apply(.[2:ncol(.)], 1, max))%>%
+  filter(max, max < 0.0001)
+  
+spiffy_rare$feature_name <- gsub(".RA", "", spiffy_rare$feature_name)  
+  
+spiffy_rare_byreeflocal <- spiffy_rare%>%
+  ungroup()%>%
+  select(-max)%>%
+  gather(site_name, RA, 2:16)%>%
+  separate(site_name, c("site", "reef_area"), sep = "_")%>%
+  select(-site)%>%
+  group_by(feature_name, reef_area)%>%
+  summarize_if(is.numeric, mean)%>%
+  ungroup()%>%
+  spread(reef_area, RA)
+  
+
 # dorcierr further cleaning -----------------------------------------------
 dorcierr_wdf <- dorcierr%>%
   separate(Timepoint, c("Timepoint", "DayNight"), sep = -1)%>%
@@ -241,6 +277,13 @@ dorcierr_transformed <- dorcierr_newt0%>%
 
 dorcierr_day_transformed <- dorcierr_transformed%>%
   filter(DayNight == "Day")
+
+
+dorcierr_exudates_day <- dorcierr_wdf%>%
+  filter(DayNight == "Day",
+         Timepoint == "T0",
+         !Replicate == 3,
+         !Replicate == 4)
 
 # PCoA --------------------------------------------------------------------
 
@@ -372,18 +415,326 @@ anova_dr_tidy <- p_values_oneway%>%
 oneway_anova_sig <- as.vector(anova_dr_tidy$feature_name)
 
 sigs_only_day <- dorcierr_day_transformed%>%
-  select(c(1:4, oneway_anova_sig))
-
-sigs_only_day$Organism <- as.factor(sigs_only_day$Organism)
+  select(c(1:4, oneway_anova_sig))%>%
+  add_column("grouping" = dorcierr_day_transformed$Organism, .before = 2)%>%
+  mutate(grouping = case_when(grouping == "Pocillopora verrucosa" ~ "Coral",
+                              grouping == "Porites lobata" ~ "Coral",
+                              grouping == "Dictyota" ~ "Fleshy Algae",
+                              grouping == "Turf" ~ "Fleshy Algae",
+                              TRUE ~ as.character(grouping)))
 
 write_csv(sigs_only_day, "dorcierr_day_forDunnetts.csv")
 
+## Post-Hoc tests run in JMP cause R is stupid and I hate it
 dunnetts_pvalue <- read_csv("~/Documents/SDSU/Moorea_2017/dorcierr/Stats/dorcierr_day_Dunnetts.csv")
   
 tukey_pvalue <-read_csv("~/Documents/SDSU/Moorea_2017/dorcierr/Stats/dorcierr_day_Tukey.csv")
 
+dunnetts_sig <- dunnetts_pvalue%>%
+  rename(`FDR_p` =`FDR Adj PValue`)%>%
+  filter(FDR_p, FDR_p < 0.05)
+
+# Different Bins ----------------------------------------------------------
+## making a primary producer pool data frame and determining what increases across all five primary producers
+primary_producer_pool_almost <- dunnetts_sig%>%
+  select(-c(1,4,5))%>%
+  mutate(FDR_p = case_when(!FDR_p == "NA" ~ 1))%>%
+  spread(Level, FDR_p)
+
+primary_producer_pool <- primary_producer_pool_almost%>%
+  add_column(sum = apply(primary_producer_pool_almost[2:6], 1, sum))%>%
+  filter(sum, sum == 5)
+
+primary_producer_compounds <- as.vector(primary_producer_pool$Y)  
+
+pp_increase <- sigs_only_day%>%
+  select(1, c(primary_producer_compounds))%>%
+  group_by(Experiment)%>%
+  summarize_if(is.numeric, sum)%>%
+  ungroup()%>%
+  select(-1)%>%
+  gather(feature_name, change, 1:100)%>%
+  filter(change, change > 0.00)
 
 
+pp_decrease <- sigs_only_day%>%
+  select(1, c(primary_producer_compounds))%>%
+  group_by(Experiment)%>%
+  summarize_if(is.numeric, sum)%>%
+  ungroup()%>%
+  select(-1)%>%
+  gather(feature_name, change, 1:100)%>%
+  filter(change, change < 0.00)
+
+pp_decrease$feature_name <- pp_decrease$feature_name%>%
+  gsub(".RA", "", .)
+
+pp_increase$feature_name <- pp_increase$feature_name%>%
+  gsub(".RA", "", .)
+
+## Trying to match pp_decrease to spiffy
+spiffy_pp_decrease <- inner_join(pp_decrease, spiffy_two_locations_pvalues_max, by = "feature_name")
+spiffy_pp_increase <- inner_join(pp_increase, spiffy_two_locations_pvalues_max, by = "feature_name")
+
+overlap_primary_producers_increase <- spiffy_pp_increase%>%
+  add_column("increased_dorcierr" = "yes", .after = 1)
+
+overlap_primary_producers_decrease <-spiffy_pp_decrease%>%
+  add_column("increased_dorcierr" = "no", .after = 1)
+
+overlap_primary_producers <- left_join(
+  bind_rows(overlap_primary_producers_increase, overlap_primary_producers_decrease), network, by = "feature_name")%>%
+  select(-c(11,12))%>%
+  separate(feature_name, "component_ID", sep = "_", remove = FALSE)
+  
+## Possible candidates of super labile compounds. 
+## Decrease in Dorcierr and found in low abundance in Spiffy (RA< 0.0001) in back/forereef
+spiffy_pvalues_max$feature_name <-spiffy_pvalues_max$feature_name%>%
+  gsub(".asin\\(sqrt)", "", .)
+
+noverlap_primary_producers_decrease <- inner_join(pp_decrease, spiffy_rare_byreeflocal, by = "feature_name")
+
+super_labile_primary_producer_candidates <- left_join(noverlap_primary_producers_decrease, network, by = "feature_name")%>%
+  select(-c('compound', 'LibraryID'))%>%
+  separate(feature_name, "component_ID", sep = "_", remove = FALSE)
+
+## Possible candidates of super recalcitrant compounds. Increase in Dorcierr and found in Spiffy
+# super_recalcitrant_primary_producers
+
+
+# BULK REEF EXUDATES [NEEDS WORK. NOT FILTERED BY SIG SPECIES>CONTROL (Level)]------------------------------------------------------
+## bulk_reef_exudates is a list of everything which is siginificant by dunnetts
+bulk_reef_exudates <- as.vector(dunnetts_sig%>%
+  group_by(Y)%>%
+  summarize_if(is.numeric, mean)%>%
+    select(Y,2)%>%
+    spread(Y, 2)%>%
+    select(-c(primary_producer_compounds))%>%
+    gather(Y, x))$Y
+  
+## sigs_only_day is all feature RA in the day which were significant by an anova
+## there are 1380 unique features which were significant in any one species from water control BY GROUPING
+bulk_reef_exudates_day_increase <- sigs_only_day%>%
+  select(grouping, c(bulk_reef_exudates))%>%
+  group_by(grouping)%>%
+  summarize_if(is.numeric, sum)%>%
+  ungroup()%>%
+  gather(feature_name, change, 2:1381)%>%
+  filter(change, change > 0.00)
+
+bulk_reef_exudates_day_decrease <- sigs_only_day%>%
+  select(grouping, c(bulk_reef_exudates))%>%
+  group_by(grouping)%>%
+  summarize_if(is.numeric, sum)%>%
+  ungroup()%>%
+  gather(feature_name, change, 2:1381)%>%
+  filter(change, change < 0.00)
+
+bulk_reef_exudates_day_decrease$feature_name <- bulk_reef_exudates_day_decrease$feature_name%>%
+  gsub(".RA", "", .)
+
+bulk_reef_exudates_day_increase$feature_name <- bulk_reef_exudates_day_increase$feature_name%>%
+  gsub(".RA", "", .)
+
+## sigs_only_day is all feature RA in the day which were significant by an anova
+## there are 1380 unique features which were significant in any one species from water control BY SPECIES
+species_bre_day_increase <- sigs_only_day%>%
+  select(Organism, c(bulk_reef_exudates))%>%
+  filter(!Organism == "Water control")%>%
+  group_by(Organism)%>%
+  summarize_if(is.numeric, mean)%>%
+  ungroup()%>%  
+  gather(feature_name, change, 2:1281)%>%
+  filter(change, change > 0.00)
+
+species_bre_day_decrease <- sigs_only_day%>%
+  select(Organism, c(bulk_reef_exudates))%>%
+  filter(!Organism == "Water control")%>%
+  group_by(Organism)%>%
+  summarize_if(is.numeric, mean)%>%
+  ungroup()%>%
+  gather(feature_name, change, 2:1281)%>%
+  filter(change, change < 0.00)
+  
+species_bre_day_increase$feature_name <- gsub(".RA", "", species_bre_day_increase$feature_name)
+
+species_bre_day_decrease$feature_name <- gsub(".RA", "", species_bre_day_decrease$feature_name)
+
+## By species decrease by network
+sbre_day_decrease_network <- left_join(species_bre_day_decrease, network, by = "feature_name")%>%
+  select(-c('compound', 'LibraryID'))%>%
+  add_column("counting" = as.numeric("1"))%>%
+  spread(Organism, counting)
+  
+sbre_day_decrease_network[is.na(sbre_day_decrease_network)] <- 0
+
+sbreddecrease_features <-sbre_day_decrease_network%>%
+  group_by(feature_name, cluster)%>%
+  summarise_at(vars(4:8), sum)%>%
+  ungroup()
+
+# Making all_networks for notes -------------------------------------------
+## organismal subsets of reef_biomarkers
+## coral
+bre_day_coral_decrease <- left_join(bulk_reef_exudates_day_decrease, network, by = "feature_name")%>%
+  select(-c('compound', 'LibraryID'))%>%
+  filter(grouping == "Coral")%>%
+  add_column("coral" = as.numeric("1"))%>%
+  group_by(cluster)%>%
+  summarise_at(vars(coral), sum)%>%
+  ungroup()%>%
+  arrange(desc(coral))
+
+bre_day_coral_increase <- left_join(bulk_reef_exudates_day_increase, network, by = "feature_name")%>%
+  select(-c('compound', 'LibraryID'))%>%
+  filter(grouping == "Coral")%>%
+  add_column("coral" = as.numeric("1"))%>%
+  group_by(cluster)%>%
+  summarise_at(vars(coral), sum)%>%
+  ungroup()%>%
+  arrange(desc(coral))
+
+coral_networks <- full_join(bre_day_coral_decrease, bre_day_coral_increase, by = "cluster", suffix = c("_decrease", "_increase"))
+
+## CCA
+bre_day_CCA_decrease <- left_join(bulk_reef_exudates_day_decrease, network, by = "feature_name")%>%
+  select(-c('compound', 'LibraryID'))%>%
+  filter(grouping == "CCA")%>%
+  add_column("cca" = as.numeric("1"))%>%
+  group_by(cluster)%>%
+  summarise_at(vars(cca), sum)%>%
+  ungroup()%>%
+  arrange(desc(cca))
+
+bre_day_CCA_increase <- left_join(bulk_reef_exudates_day_increase, network, by = "feature_name")%>%
+  select(-c('compound', 'LibraryID'))%>%
+  filter(grouping == "CCA")%>%
+  add_column("cca" = as.numeric("1"))%>%
+  group_by(cluster)%>%
+  summarise_at(vars(cca), sum)%>%
+  ungroup()%>%
+  arrange(desc(cca))
+
+cca_networks <- full_join(bre_day_CCA_decrease, bre_day_CCA_increase, network, by = "cluster", suffix = c("_decrease", "_increase"))
+
+## All Algae
+bre_day_algae_decrease <- left_join(bulk_reef_exudates_day_decrease, network, by = "feature_name")%>%
+  select(-c('compound', 'LibraryID'))%>%
+  filter(!grouping == "Coral",
+         !grouping == "Water control")%>%
+  add_column("algae" = as.numeric("1"))%>%
+  group_by(cluster)%>%
+  summarise_at(vars(algae), sum)%>%
+  ungroup()%>%
+  arrange(desc(algae))
+
+bre_day_algae_increase <- left_join(bulk_reef_exudates_day_increase, network, by = "feature_name")%>%
+  select(-c('compound', 'LibraryID'))%>%
+  filter(!grouping == "Coral",
+         !grouping == "Water control")%>%
+  add_column("algae" = as.numeric("1"))%>%
+  group_by(cluster)%>%
+  summarise_at(vars(algae), sum)%>%
+  ungroup()%>%
+  arrange(desc(algae))
+
+algae_networks <- full_join(bre_day_algae_decrease, bre_day_algae_increase, by = "cluster", suffix = c("_decrease", "_increase"))
+
+## Fleshy Algae
+bre_day_fleshy_decrease <- left_join(bulk_reef_exudates_day_decrease, network, by = "feature_name")%>%
+  select(-c('compound', 'LibraryID'))%>%
+  filter(grouping == "Fleshy Algae")%>%
+  add_column("fleshy" = as.numeric("1"))%>%
+  group_by(cluster)%>%
+  summarise_at(vars(fleshy), sum)%>%
+  ungroup()%>%
+  arrange(desc(fleshy))
+
+bre_day_fleshy_increase <- left_join(bulk_reef_exudates_day_increase, network, by = "feature_name")%>%
+  select(-c('compound', 'LibraryID'))%>%
+  filter(grouping == "Fleshy Algae")%>%
+  add_column("fleshy" = as.numeric("1"))%>%
+  group_by(cluster)%>%
+  summarise_at(vars(fleshy), sum)%>%
+  ungroup()%>%
+  arrange(desc(fleshy))
+
+fleshy_network <- full_join(bre_day_fleshy_decrease, bre_day_fleshy_increase, by = "cluster", suffix = c("_decrease", "_increase"))
+
+
+all_networks <- full_join(
+    full_join(
+      full_join(coral_networks, fleshy_network, by = "cluster"), 
+      cca_networks, by = "cluster"), 
+    algae_networks, by = "cluster")
+
+all_networks[is.na(all_networks)] <- 0
+
+all_networks$max <- apply(all_networks[2:ncol(all_networks)], 1, sum)
+
+
+
+
+# Dorcierr Exudation ------------------------------------------------------
+
+exudates_day_dunnetts <- read_csv("~/Documents/SDSU/Moorea_2017/dorcierr/Stats/Dorcierr_exudates_day_Dunnetts.csv")%>%
+  rename(`FDR_p` = `FDR Adj PValue`)
+
+sig_exudates <- exudates_day_dunnetts%>%
+  filter(FDR_p, FDR_p < 0.05)%>%
+  select(-c(1,4,5))%>%
+  add_column("binary" = as.numeric("1"))%>%
+  rename(`feature_name` = `Y`)
+
+sig_exudates$feature_name <- gsub(".asin\\(sqrt)", "", sig_exudates$feature_name)
+
+sig_exudates_spread <- sig_exudates%>%
+  select(-FDR_p)%>%
+  spread(Level, binary)%>%
+  add_column("coral" = .$`Pocillopora verrucosa`+ .$`Porites lobata`)%>%
+  add_column("calcifiers" = .$coral + .$CCA)%>%
+  add_column("fleshy" = .$Turf + .$Dictyota)%>%
+  add_column("algae"= .$fleshy + .$CCA)%>%
+  add_column("primary_producers" = .$coral +.$algae)%>%
+  add_column("pv_cca" = .$`Pocillopora verrucosa`+ .$CCA)%>%
+  add_column("pv_turf" = .$`Pocillopora verrucosa`+ .$Turf)%>%
+  add_column("pv_dictyota" = .$`Pocillopora verrucosa`+ .$Dictyota)%>%
+  add_column("pl_cca" = .$`Porites lobata`+ .$CCA)%>%
+  add_column("pl_turf" = .$`Porites lobata`+ .$Turf)%>%
+  add_column("pl_dictyota" = .$`Porites lobata`+ .$Dictyota)%>%
+  add_column("cca_turf" = .$CCA+ .$Turf)%>%
+  add_column("cca_dictyota" = .$CCA + .$Dictyota)%>%
+  add_column("coral_turf" = .$coral + .$Turf)%>%
+  add_column("coral_dictyota" = .$coral + .$Dictyota)%>%
+  add_column("pv_fleshy" = .$fleshy + .$`Pocillopora verrucosa`)%>%
+  add_column("pl_fleshy" = .$fleshy + .$`Porites lobata`)%>%
+  add_column("not_PV" = .$algae + .$`Porites lobata`)%>%
+  add_column("not_PL" = .$algae+ .$`Pocillopora verrucosa`)%>%
+  add_column("not_CCA" = .$coral + .$fleshy)%>%
+  add_column("not_turf" = .$calcifiers + .$Dictyota)%>%
+  add_column("not_Dicyota" = .$calcifiers + .$Turf)
+
+sig_exudates_spread[is.na(sig_exudates_spread)] <- 0
+
+sig_exudates_numeric <- sig_exudates_spread%>%
+  select(-1)
+  
+sig_exudates_numeric$MaxNames <- colnames(sig_exudates_numeric)[max.col(sig_exudates_numeric, ties.method="first")]  
+
+exudates_ranked <- sig_exudates_numeric%>%
+  add_column(sig_exudates_spread$Y, .before = 1)%>%
+  select(1, 29)%>%
+  rename(`feature_name` = `sig_exudates_spread$Y`)
+
+exudate_networks_ranked <- left_join(exudates_ranked, network, by = "feature_name")%>%
+  select(-c(4,5))%>%
+  separate(feature_name, "component_ID", sep = "_", remove = FALSE)
+
+## networks for features
+exudates_network_features <- left_join(sig_exudates, network, by = "feature_name")%>%
+  select(-c(3,6,7))%>%
+  group_by(feature_name, cluster)%>%
+  summarize_at(vars(3), sum)
 
 # Two Way-ANOVA and Post-Hoc -------------------------------------------------------------------
 
@@ -500,14 +851,131 @@ organism_night_pos <- dorcierr_meanmax_organism_night%>%
 test <- inner_join(organism_night_pos, organism_day_neg, by = "feature_name", suffix = c(".night", ".day"))%>%
   select(-c(2:8, 12:18))
 
+# Super Labile Primary Producer Compounds ---------------------------------
+labile_pp_RA <- super_labile_primary_producer_candidates
+
+labile_pp_RA$feature_name <- paste0(labile_pp_RA$feature_name, ".RA")
+
+labile_pp_RA_vector <- as.vector(labile_pp_RA$feature_name)
+
+super_labile_pp_42 <- as.vector(labile_pp_RA%>%
+                                  filter(cluster == "42"))$feature_name
+
+super_labile_pp_90 <-as.vector(labile_pp_RA%>%
+                                 filter(cluster == "90"))$feature_name
+
+super_labile_pp_623 <- as.vector(labile_pp_RA%>%
+                                   filter(cluster == "623"))$feature_name
+
+dorcierr_labile_pp_42 <- dorcierr_wdf%>%
+  select(1:5, c(super_labile_pp_42))
+
+dorcierr_labile_pp_90 <- dorcierr_wdf%>%
+  select(1:5, c(super_labile_pp_90))
+
+dorcierr_labile_pp_623 <- dorcierr_wdf%>%
+  select(1:5, c(super_labile_pp_623))
+
+
+dorcierr_labile_pp_general <- dorcierr_wdf%>%
+  select(1:5, c(labile_pp_RA_vector))
+
+write_csv(dorcierr_labile_pp_general, "dorcierr_RA_pp_all.csv")
+# Significantly eaten -----------------------------------------------------
+sbreddecrease_features_dotRA <- sbreddecrease_features
+
+sbreddecrease_features_dotRA$feature_name <- paste0(sbreddecrease_features_dotRA$feature_name, ".RA")
+
+network_596_eaten <- as.vector(sbreddecrease_features_dotRA%>%
+                                 filter(cluster == "596"))$feature_name
+
+dorcierr_labile_calcifiers_596 <- dorcierr_wdf%>%
+  select(1:5, c(network_596_eaten))
+
+day_transformed_transposed <- dorcierr_day_transformed%>%
+  gather(feature_name, RA, 5:8857)%>%
+  select(-c(1,3,4))
+
+slab_org <- left_join(labile_pp_RA, day_transformed_transposed, by = "feature_name")%>%
+  select(-c(1:5))%>%
+  group_by(cluster, Organism)%>%
+  summarise_at(vars(RA), mean)%>%
+  ungroup()%>%
+  spread(cluster, RA)
+
+# Sifnificantly produced --------------------------------------------------
+sig_exudate_names <- exudates_network_features
+
+sig_exudate_names$feature_name <- paste0(sig_exudate_names$feature_name, ".RA")
+
+#Networks 42, 90, 623, 596
+network_42_exuded <- as.vector(sig_exudate_names%>%
+                                  filter(cluster == "42"))$feature_name
+network_90_exuded <- as.vector(sig_exudate_names%>%
+                                  filter(cluster == "90"))$feature_name
+network_623_exuded <- as.vector(sig_exudate_names%>%
+                                  filter(cluster == "623"))$feature_name
+
+network_596_exuded <- as.vector(sig_exudate_names%>%
+                                 filter(cluster == "596"))$feature_name
+network_7_exuded <- as.vector(sig_exudate_names%>%
+                                  filter(cluster == "7"))$feature_name
+network_253_exuded <- as.vector(sig_exudate_names%>%
+                                filter(cluster == "253"))$feature_name
+
+## PP production
+dorcierr_production_pp_42 <- dorcierr_exudates_day%>%
+  select(1:5, c(network_42_exuded))
+
+dorcierr_production_pp_90 <- dorcierr_exudates_day%>%
+  select(1:5, c(network_90_exuded))
+
+dorcierr_production_pp_623 <- dorcierr_exudates_day%>%
+  select(1:5, c(network_623_exuded))
+
+## Calcifiers
+dorcierr_production_calfiers_596 <- dorcierr_exudates_day%>%
+  select(1:5, c(network_596_exuded))
+
+dorcierr_production_calfiers_253 <- dorcierr_exudates_day%>%
+  select(1:5, c(network_253_exuded))
 
 # Writing CSVs ------------------------------------------------------------
 
+## working data frames
 write_csv(moorea_wdf, "moorea_metab_FeatureID_samples.csv")
-
 write_csv(both_runs, "Moorea_2017_new_and_old_runs.csv")
 write_delim(scan_IDs, "Feature_ID.txt", delim = " ", col_names = FALSE)
-
 write_csv(both_runs_by_old, "new_by_old_AllMeta.csv")
 
-write_csv(dorcierr, "Dorcierr_metab_wdf.csv")
+write_csv(dorcierr_wdf, "Dorcierr_metab_wdf.csv")
+write_csv(spiffy_wdf, "spiffy_wdf.csv") 
+write_csv(dorcierr_exudates_day, "Dorcierr_exudates_day.csv")
+
+# Change in network IDs
+write_csv(Node_check, "Moorea_network_changes.csv")
+
+# Significant compounds
+write_csv(spiffy_two_locations_pvalues_max, "spiffy_significance_byreeflocation.csv")
+
+write_csv(overlap_primary_producers, "overlap_between_dorcierr_primaryprods_spiffy.csv")
+write_csv(super_labile_primary_producer_candidates, "super_labile_primary_producer_candidates_dorcierr.csv")
+
+## Super Labile compounds for bar charts TF-T0
+# write_csv(dorcierr_labile_pp_42, "dorcierr_labile_pp_42.csv")
+# write_csv(dorcierr_labile_pp_90, "dorcierr_labile_pp_90.csv")
+# write_csv(dorcierr_labile_pp_623, "dorcierr_labile_pp_623.csv")
+# write_csv(dorcierr_labile_calcifiers_596, "dorcierr_labile_calcifiers_596.csv")
+
+write_csv(slab_org, "super_labile_for_graphing.csv")
+
+## Super labile compound production (T0)
+write_csv(dorcierr_production_pp_42, "dorcierr_production_pp_42.csv")
+write_csv(dorcierr_production_pp_90, "dorcierr_production_pp_90.csv")
+write_csv(dorcierr_production_pp_623, "dorcierr_production_pp_623.csv")
+
+write_csv(dorcierr_production_calfiers_596, "dorcierr_production_calcifiers_596.csv")
+write_csv(dorcierr_production_calfiers_7, "dorcierr_production_calcifiers_7.csv")
+write_csv(dorcierr_production_calfiers_253, "dorcierr_production_calfiers_253.csv")
+
+
