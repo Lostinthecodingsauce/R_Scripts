@@ -8,6 +8,7 @@ library(tidyverse)
 library(data.table)
 library(DescTools)
 library(broom)
+library(readxl)
 
 #PCoA, PERMANOVA
 library(vegan)
