@@ -17,7 +17,7 @@ library(wesanderson)
 library(RColorBrewer)
 
 
-# Reading in CSVs ---------------------------------------------------------
+# Reading in Dataframes ---------------------------------------------------------
 # True hits and analog hits are exported CSVs from GNPS
 # True hits are more strictly matched to the library
 true_hits <- read_tsv("Library-hits.tsv")%>%
@@ -52,14 +52,35 @@ ms_sample_codes <- read_csv("Mo'orea 2017 Mass spec sample codes - Sheet1.csv")%
   rename('run_code' = 'Sample ID',
          'sample_code' = 'Sample Name')
 
+# Combining metadata and creating feature_table ---------------------------
 ## highest probability canopus annotation
 # canopus gives many different classifications and the percent chance that the feature falls into that category
 # This section pulls the feature whcih has the highest possiblity to be it.
+# We want only canopus annotations which are level 5 AND above 70% probability
+canopus_annotation_names <- colnames(canopus_anotations[2:1288])
+
+## >= 5 leaves 2096 features post cleaning
+chemont_anotations_filtered <- chemont_anotations%>%
+  filter(canopus_annotation %like any% c(canopus_annotation_names),
+         level, level >= 5)
+
+chemont_filtered_names <- as.vector(chemont_anotations_filtered$canopus_annotation)
+
+#Filtering out low level canopus names
+canopus_filtered_anotations <- canopus_anotations%>%
+  dplyr::select(1, c(chemont_filtered_names))
+
+# Max column creation
 canopus_best_match <- as.data.frame(canopus_anotations$name)%>%
   rename('feature_number' = 1)
+
 canopus_best_match$canopus_probability <- apply(canopus_anotations[2:ncol(canopus_anotations)], 1, max)
-canopus_best_match$canopus_annotation <- colnames(canopus_anotations)[max.col(canopus_anotations[2:1288],
+canopus_best_match$canopus_annotation <- colnames(canopus_filtered_anotations)[max.col(canopus_filtered_anotations[2:619],
                                                                               ties.method="first")]
+
+canopus_best_match_70 <- canopus_best_match%>%
+  filter(canopus_probability, canopus_probability >= 0.7)
+
 # Combines canopus, sirus, and zodiac
 super_computer_annotations <- full_join(left_join(canopus_best_match, chemont_anotations, by = 'canopus_annotation'), sirius_zodiac_anotations, by = "feature_number")
 
@@ -155,6 +176,7 @@ feature_asin_sqrt <-
       function(x) asin(sqrt(x))))%>%
   add_column(feature_number = feature_table_no_back_trans$feature_number)
 
+# Build feature table working data frame ----------------------------------
 # All three joined together (Peak area, RA, asin(sqrt))
 # Node and network info = [1:25], CANOPUS = [25:27], SIRIUS/ZODIAC = [28:40], Library Hits = [41:67], analog hits = []
 # Blanks.RA = [112:119, 370], Area under the curve = [120:369], 
