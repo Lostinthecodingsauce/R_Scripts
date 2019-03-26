@@ -36,6 +36,7 @@ canopus_anotations <- read_csv("SIRIUS_etc/converted/Canopus_classes.csv")
 
 chemont_anotations <- read_csv("categories.canopus.strings.nelsonMarch2019.CSV")%>%
   rename('canopus_annotation' = 'name')
+
 # Sirius and Zodiac both try to assign molecular formulas to all the features
 sirius_zodiac_anotations <- read_csv("SIRIUS_etc/converted/SIRIUS_Zodiac_converted.csv")%>%
   rename(feature_number = 1)%>%
@@ -224,7 +225,6 @@ moorea_wdf <- moorea_transposed%>%
                                      Organism == "WA" ~ "Water control",
                                      TRUE ~ as.character(Organism)))
 
-# moorea_wdf["Timepoint"][is.na(moorea_wdf["Timepoint"])] <- 0
 
 dorcierr <- moorea_wdf%>%
   filter(Experiment == "dorcierr")
@@ -302,7 +302,7 @@ rr3_day_RA <- moorea_wdf_RA%>%
   filter(Timepoint == 'TF',
          DayNight == "Day")
 
-# Spiffy Workshopping -----------------------------------------------------
+# Spiffy Cleaning and Subsetting-----------------------------------------------------
 spiffy_wdf <- spiffy%>%
   add_column(reef_area = spiffy$Organism, .before = 3)%>%
   rename(`Site` =`Organism`)%>%
@@ -344,6 +344,7 @@ spiffy_no_bay_RA <- moorea_wdf_RA%>%
                                TRUE ~ "Forereef"))%>%
   filter(!reef_area == "bay")
 
+# Spiffy Oneway Anova -----------------------------------------------------
 ## One way anova looking at only backreef and fore reef
 aov_spiffy <- as.data.frame(sapply(spiffy_no_bay[5:ncol(spiffy_no_bay)], function(x) summary(aov(x ~ spiffy_no_bay[["reef_area"]]))[[1]][1,'Pr(>F)']))
 
@@ -366,6 +367,9 @@ spiffy_only_sigs <- spiffy_no_bay%>%
   gather(feature_name, RA, 2:1480)%>%
   spread(reef_area, RA)
 
+# Spiffy largest player table ---------------------------------------------
+
+
 ## Making spiffy max table
 spiffy_means_only <-spiffy_only_sigs%>%
   dplyr::select(-1)
@@ -382,9 +386,7 @@ spiffy_two_locations_pvalues_max <- spiffy_only_sigs%>%
 spiffy_two_locations_pvalues_max$feature_name <-spiffy_two_locations_pvalues_max$feature_name%>%
   gsub(".asin\\(sqrt)", "", .)
 
-spiffy_twolocals_network <- left_join(
-  spiffy_two_locations_pvalues_max, network, by = "feature_name"
-)
+# Spiffy significant columns ----------------------------------------------
 ## Making spiffy columns to be added to feature_table_master
 spiffy_sig_columns <-anova_sigs_spiffy%>%
   dplyr::select(-f_value)%>%
@@ -423,7 +425,7 @@ spiffy_rare_byreeflocal <- spiffy_rare%>%
 
 
 
-# dorcierr cleanup and subsetting -----------------------------------------------
+# Dorcierr cleanup and subsetting -----------------------------------------------
 dorcierr_wdf <- dorcierr%>%
   separate(Timepoint, c("Timepoint", "DayNight"), sep = -1)%>%
   mutate(DayNight = case_when(DayNight == "D" ~ "Day",
@@ -563,7 +565,7 @@ timepoint_anova_sigs <- p_values_oneway_day_remins_dorc%>%
   add_column('Water control_%diff_TF-T0_D_day' = dorcierr_day_transformed_RA_sig$`Water control_%diff_Tf-T0_dorcierr`, .after = 18)
 
 
-# Dunnetts test testing ---------------------------------------------------
+# Dorcierr Dunnetts  ---------------------------------------------------
 ## glht will run but gives confusing output. Trying to mull through it
 # Comes from Multcomp which gives problems with select function.
 set.seed(2005)
@@ -740,6 +742,7 @@ rr3_percent_difference_RA <- as.data.frame(
 rr3_diff_columns_RA <- left_join(rr3_difference_RA, rr3_percent_difference_RA, by = 'feature_number', suffix = c("_diff", "_%diff"))%>%
   filter(feature_number %like any% c(dunnett_rr3_sig_features))
 
+
 ## adding in difference and percent difference to sig pvalues
 rr3_dunnett_sig_columns <- dunnett_sig_rr3_day%>%
   add_column('CCA_diff_rr3_day_dunnett' = rr3_diff_columns_RA$CCA_diff, .after = 2)%>%
@@ -754,15 +757,60 @@ rr3_dunnett_sig_columns <- dunnett_sig_rr3_day%>%
   add_column('Turf_%diff_rr3_day_dunnett' = rr3_diff_columns_RA$`Turf_%diff`, .after = 15)
 
 
+# RR3 Tukeys -------------------------------------------------------------
+tukey_model_rrday <- sapply(rr3_day_dunnetts[6:3788], function(x)
+  TukeyHSD(aov(x ~ rr3_day_dunnetts$Organism, data = rr3_day_dunnetts), p.adjust.methods = "BH"))
+
+p_values_tukey_rr3_day <- as.data.frame(tukey_model_rrday)%>%
+  rownames_to_column(var = "variable")%>%
+  gather(feature_info, value, 2:15133)%>%
+  filter(feature_info %like% '%p.adj%')%>%
+  filter(value, value < 0.05)
+
+p_values_tukey_rr3_day$feature_info <- p_values_tukey_rr3_day$feature_info%>%
+  gsub("X", "", .)%>%
+  gsub("rr3_day_dunnetts.Organism.p.adj", "adj_p_rr3_tukey_day", .)
+
+sig_tukey_rr3_day <- p_values_tukey_rr3_day%>%
+  separate(feature_info, c("feature_number", "test_info"), sep = "\\.")%>%
+  unite(column_names, c(variable, test_info), sep = "_")
+
+tukey_sig_figs <- as.vector(sig_tukey_rr3_day%>% spread(column_names, value))$feature_number
+
+## This part is cheesy. I am letting Tukey calculate diff for me for RA values. P_values not pulled form this test
+diff_model_rrra <- sapply(rr3_day_RA[6:ncol(rr3_day_RA)], function(x)
+  TukeyHSD(aov(x ~ rr3_day_RA$Organism, data = rr3_day_RA)))
+
+diff_tukey_rr3_day <- as.data.frame(diff_model_rrra)%>%
+  rownames_to_column(var = "variable")%>%
+  gather(feature_info, value, 2:54153)%>%
+  filter(feature_info %like% '%diff%')
+
+diff_tukey_rr3_day$feature_info <- diff_tukey_rr3_day$feature_info%>%
+  gsub("X", "", .)%>%
+  gsub("rr3_day_RA.Organism.diff", "diff_rr3_tukey_day", .)
+
+sig_diff_tukey_rr3_day <- diff_tukey_rr3_day%>%
+  separate(feature_info, c("feature_number", "test_info"), sep = "\\.")%>%
+  unite(column_names, c(variable, test_info), sep = "_")%>%
+  filter(feature_number %like any% c(tukey_sig_figs))
+
+## combining diff and p_value columns
+rr3_tukey_sig_columns <- bind_rows(sig_tukey_rr3_day, sig_diff_tukey_rr3_day)%>%
+  arrange(column_names)%>%
+  spread(column_names, value)
+
 # Adding all stat columns into the feature_table_wdf ----------------------
 feature_table_wdf_stats <- full_join(
   full_join(
     full_join(
       full_join(
-        full_join(feature_table_wdf, dunnett_sig_columns, by = "feature_number"),
-        timepoint_anova_sigs, by = "feature_number"),
-      spiffy_sig_columns, by = "feature_number"),
-    spiffy_rare_byreeflocal, by = "feature_number"),
-  rr3_dunnett_sig_columns, by = "feature_number")
+        full_join(
+          full_join(feature_table_wdf, dunnett_sig_columns, by = "feature_number"),
+          timepoint_anova_sigs, by = "feature_number"),
+        spiffy_sig_columns, by = "feature_number"),
+      spiffy_rare_byreeflocal, by = "feature_number"),
+    rr3_dunnett_sig_columns, by = "feature_number"),
+  rr3_tukey_sig_columns, by = "feature_number")
 
 write_csv(feature_table_wdf_stats, "feature_table_master_post_stats.csv")
