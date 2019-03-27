@@ -57,32 +57,23 @@ ms_sample_codes <- read_csv("Mo'orea 2017 Mass spec sample codes - Sheet1.csv")%
 # canopus gives many different classifications and the percent chance that the feature falls into that category
 # This section pulls the feature whcih has the highest possiblity to be it.
 # We want only canopus annotations which are level 5 AND above 70% probability
-canopus_annotation_names <- colnames(canopus_anotations[2:1288])
+canopus_annotation_names <- canopus_anotations%>%
+  gather(canopus_annotation, canopus_probability, 2:1288)
 
-## >= 5 leaves 2096 features post cleaning
-chemont_anotations_filtered <- chemont_anotations%>%
-  filter(canopus_annotation %like any% c(canopus_annotation_names),
-         level, level >= 5)
+canopus_chemonnt_tidy <- left_join(canopus_annotation_names, chemont_anotations, by = "canopus_annotation")
 
-chemont_filtered_names <- as.vector(chemont_anotations_filtered$canopus_annotation)
-
-#Filtering out low level canopus names
-canopus_filtered_anotations <- canopus_anotations%>%
-  dplyr::select(1, c(chemont_filtered_names))
-
-# Max column creation
-canopus_best_match <- as.data.frame(canopus_anotations$name)%>%
-  rename('feature_number' = 1)
-
-canopus_best_match$canopus_probability <- apply(canopus_anotations[2:ncol(canopus_anotations)], 1, max)
-canopus_best_match$canopus_annotation <- colnames(canopus_filtered_anotations)[max.col(canopus_filtered_anotations[2:619],
-                                                                              ties.method="first")]
-
-canopus_best_match_70 <- canopus_best_match%>%
-  filter(canopus_probability, canopus_probability >= 0.7)
+canopus_filtered_tidy <- canopus_chemonnt_tidy%>%
+  rename('feature_number' = 'name')%>%
+  group_by(feature_number)%>%
+  do(filter(., canopus_probability >= 0.70))%>%
+  do(filter(., level == max(level)))%>%
+  do(filter(., canopus_probability == max(canopus_probability)))%>%
+  do(filter(., nchar(CLASS_STRING) == max(nchar(CLASS_STRING))))%>%
+  do(filter(., nchar(canopus_annotation) == max(nchar(canopus_annotation))))%>%
+  ungroup()
 
 # Combines canopus, sirus, and zodiac
-super_computer_annotations <- full_join(left_join(canopus_best_match, chemont_anotations, by = 'canopus_annotation'), sirius_zodiac_anotations, by = "feature_number")
+super_computer_annotations <- full_join(canopus_filtered_tidy, sirius_zodiac_anotations, by = "feature_number")
 
 ## join library hits, analog hits and super computer predictions
 metadata <- full_join(node_info, 
@@ -181,14 +172,11 @@ feature_asin_sqrt <-
 # Node and network info = [1:25], CANOPUS = [25:27], SIRIUS/ZODIAC = [28:40], Library Hits = [41:67], analog hits = []
 # Blanks.RA = [112:119, 370], Area under the curve = [120:369], 
 # RA (blanks included) = [371:630], asin(sqrt) (blanks included) = [631:888]
-feature_table_combined <- 
-  right_join(metadata,
-               left_join(
-                 left_join(
-                   feature_table_no_back_trans, feature_relative_abundance,
-                   by = "feature_number", suffix = c("" , ".RA")),
-                 feature_asin_sqrt, by = "feature_number", suffix = c("", ".asin(sqrt)")),
-               by = "feature_number")
+feature_table_combined <- left_join(
+  left_join(
+    right_join(metadata, feature_table_no_back_trans, by = 'feature_number'),
+    feature_relative_abundance, by = 'feature_number', suffix = c("", ".RA")),
+  feature_asin_sqrt, by = "feature_number", suffix = c("", ".asin(sqrt)"))
 
 feature_table_wdf <- feature_table_combined%>%
   dplyr::select(feature_number, everything())
@@ -374,10 +362,10 @@ anova_spiffy <- aov_spiffy%>%
   rownames_to_column(var = "feature_name")%>%
   rename(`f_value`= `sapply(spiffy_no_bay[5:ncol(spiffy_no_bay)], function(x) summary(aov(x ~ spiffy_no_bay[["reef_area"]]))[[1]][1, "Pr(>F)"])`)
 
-anova_spiffy$FDR_f <- p.adjust(anova_spiffy$f_value, method = "BH")
+anova_spiffy$FDR_p <- p.adjust(anova_spiffy$f_value, method = "BH")
 
 anova_sigs_spiffy <- anova_spiffy%>%
-  filter(FDR_f, FDR_f < 0.05)
+  filter(FDR_p, FDR_p < 0.05)
 
 spiffy_sig_names <-as.vector(anova_sigs_spiffy$feature_name)
 
@@ -390,8 +378,6 @@ spiffy_only_sigs <- spiffy_no_bay%>%
   spread(reef_area, RA)
 
 # Spiffy largest player table ---------------------------------------------
-
-
 ## Making spiffy max table
 spiffy_means_only <-spiffy_only_sigs%>%
   dplyr::select(-1)
@@ -412,7 +398,7 @@ spiffy_two_locations_pvalues_max$feature_name <-spiffy_two_locations_pvalues_max
 ## Making spiffy columns to be added to feature_table_master
 spiffy_sig_columns <-anova_sigs_spiffy%>%
   dplyr::select(-f_value)%>%
-  add_column('back-fore_spiffy' = spiffy_only_sigs$backreef-spiffy_only_sigs$Forereef)%>%
+  add_column('diff_back-fore_spiffy' = spiffy_only_sigs$backreef-spiffy_only_sigs$Forereef)%>%
   add_column('%diff_spiffy' = (spiffy_only_sigs$backreef-spiffy_only_sigs$Forereef)/(spiffy_only_sigs$backreef+spiffy_only_sigs$Forereef))%>%
   rename('feature_number' = 'feature_name')
 
@@ -464,6 +450,8 @@ dorcierr_exudates_day <- dorcierr_wdf%>%
          !Replicate == 3,
          !Replicate == 4)
 
+dorcierr_remins_day <- dorcierr_wdf%>%
+  filter(DayNight == "Day")
 ## Need to take the mean of T0 to subtract from TF because of the differences in replicate
 ## This section needs to be redone because it is outdated
 dorcierr_transformations <- dorcierr_wdf_RA%>%
@@ -536,7 +524,7 @@ sig_features_day_exudates_dorc <- as.factor(sig_one_way_day_exudates_dorc$featur
 # Dorcierr transformations (T0 to TF) -------------------------------------
 ## dorcierr remineralizations T0 and TF to test each species difference between T0 and TF
 # This filters out anything that is 0's across the board
-dorcierr_remineralizations_day_anova <- dorcierr_remineralizations_day%>%
+dorcierr_remineralizations_day_anova <- dorcierr_remins_day%>%
   unite(org_rep, c("Organism", "Replicate", "Timepoint"), sep = "_", remove = TRUE)%>%
   gather(feature_number, asin, 4:13541)%>%
   spread(org_rep, asin)%>%
