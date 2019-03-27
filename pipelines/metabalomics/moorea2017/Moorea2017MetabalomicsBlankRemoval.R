@@ -304,6 +304,12 @@ dorcierr_exudates_day_RA <- dorcierr_wdf_RA%>%
          !Replicate == 3,
          !Replicate == 4)
 
+dorcierr_exudates_night_RA <- dorcierr_wdf_RA%>%
+  filter(DayNight == "Night",
+         Timepoint == "T0",
+         !Replicate == 3,
+         !Replicate == 4)
+
 rr3_day_RA <- moorea_wdf_RA%>%
   filter(Experiment == "dorcierr")%>%
   separate(Timepoint, c("Timepoint", "DayNight"), sep = -1)%>%
@@ -311,6 +317,15 @@ rr3_day_RA <- moorea_wdf_RA%>%
                               TRUE ~ "Night"))%>%
   filter(Timepoint == 'TF',
          DayNight == "Day")
+
+rr3_night_RA <- moorea_wdf_RA%>%
+  filter(Experiment == "dorcierr")%>%
+  separate(Timepoint, c("Timepoint", "DayNight"), sep = -1)%>%
+  mutate(DayNight = case_when(DayNight == "D" ~ "Day",
+                              TRUE ~ "Night"))%>%
+  filter(Timepoint == 'TF',
+         DayNight == "Night")
+
 
 # Spiffy Cleaning and Subsetting-----------------------------------------------------
 spiffy_wdf <- spiffy%>%
@@ -452,6 +467,13 @@ dorcierr_exudates_day <- dorcierr_wdf%>%
 
 dorcierr_remins_day <- dorcierr_wdf%>%
   filter(DayNight == "Day")
+
+dorcierr_exudates_night <- dorcierr_wdf%>%
+  filter(DayNight == "Night",
+         Timepoint == "T0")
+
+dorcierr_remins_day <- dorcierr_wdf%>%
+  filter(DayNight == "Night")
 ## Need to take the mean of T0 to subtract from TF because of the differences in replicate
 ## This section needs to be redone because it is outdated
 dorcierr_transformations <- dorcierr_wdf_RA%>%
@@ -505,7 +527,7 @@ dorcierr_day_transformed_RA <- dorcierr_transformed%>%
   filter(DayNight == "Day")
 
 
-# Dorcierr Day Exudates (T0) ----------------------------------------------
+# Dorcierr Day Exudates (T0) ANOVA----------------------------------------------
 # Oneway anova significant features
 p_values_oneway_day_exudates_dorc <- 
   as.data.frame(
@@ -520,8 +542,7 @@ sig_one_way_day_exudates_dorc <- p_values_oneway_day_exudates_dorc%>%
 
 sig_features_day_exudates_dorc <- as.factor(sig_one_way_day_exudates_dorc$feature_number)
 
-
-# Dorcierr transformations (T0 to TF) -------------------------------------
+# Dorcierr Day transformations (T0 to TF) -------------------------------------
 ## dorcierr remineralizations T0 and TF to test each species difference between T0 and TF
 # This filters out anything that is 0's across the board
 dorcierr_remineralizations_day_anova <- dorcierr_remins_day%>%
@@ -575,8 +596,7 @@ timepoint_anova_sigs <- p_values_oneway_day_remins_dorc%>%
   add_column('Water control_%diff_TF-T0_D_day' = dorcierr_day_transformed_RA_sig$`Water control_%diff_Tf-T0_dorcierr`, .after = 18)
 
 
-# Dorcierr Dunnetts  ---------------------------------------------------
-## glht will run but gives confusing output. Trying to mull through it
+# Dorcierr Dunnetts Day ---------------------------------------------------
 # Comes from Multcomp which gives problems with select function.
 set.seed(2005)
 ## dorcierr exudates only looks at T0
@@ -661,6 +681,103 @@ dunnett_sig_columns <- dunnett_sig_exudates_day%>%
   add_column('Turf_diff_D_exudates_day_dunnett' = exudate_diff_columns_RA$Turf_diff, .after = 14)%>%
   add_column('Turf_%diff_D_exudates_day_dunnett' = exudate_diff_columns_RA$`Turf_%diff`, .after = 15)
 
+# Dorcierr Night Exudates (T0) Night --------------------------------------
+# Oneway anova significant features
+p_values_oneway_night_exudates_dorc <- 
+  as.data.frame(
+    sapply(
+      dorcierr_exudates_night[6:ncol(dorcierr_exudates_night)],
+      function(x) summary(aov(x ~ dorcierr_exudates_night[["Organism"]]))[[1]][1,'Pr(>F)']))
+
+sig_one_way_night_exudates_dorc <- p_values_oneway_night_exudates_dorc%>%
+  rownames_to_column(var = "feature_number")%>%
+  rename('p_value' = 2)%>%
+  filter(p_value, p_value < 0.05)
+
+sig_features_night_exudates_dorc <- as.factor(sig_one_way_night_exudates_dorc$feature_number)
+
+# Dorcierr Night Dunnetts -------------------------------------------------
+## dorcierr exudates only looks at T0
+## There are some NA's or 0s which interfere with the dunnett model
+dorcierr_exudates_night_dunnetts <- dorcierr_exudates_night%>%
+  dplyr::select(c(1:5, sig_features_night_exudates_dorc))%>%
+  unite(org_rep, c("Organism", "Replicate"), sep = "_", remove = TRUE)%>%
+  gather(feature_name, asin, 5:ncol(.))%>%
+  spread(org_rep, asin)%>%
+  add_column(sum = apply(.[5:16], 1, sum))%>%
+  filter(!sum == 0)%>%
+  dplyr::select(-sum)%>%
+  gather(org_rep, asin, 5:16)%>%
+  spread(feature_name, asin)%>%
+  separate(org_rep, c("Organism", "Replicate"), sep = "_", remove = TRUE)
+
+dunnett_model_exnight <- lapply(dorcierr_exudates_night_dunnetts[6:ncol(dorcierr_exudates_night_dunnetts)], function(y, f)
+  summary(glht(aov(y ~ f, dorcierr_exudates_night_dunnetts), 
+               linfct = mcp(f = "Dunnett"))),
+  f = 
+    as.factor(
+      relevel(
+        factor(dorcierr_exudates_night$Organism), "Water control")))
+
+p_values_dunnett_exudates_night <- as.data.frame(
+  sapply(
+    dunnett_model_exnight,
+    function(x) x$test$pvalues))
+
+rm(dunnett_model_exnight)  
+
+p_values_dunnett_exudates_night <- cbind("Organism" = c("CCA_WA_P_value_D_exudates_night_dunnett",
+                                                      "Dictyota_WA_P_value_D_exudates_night_dunnett", 
+                                                      "Pocillopora verrucosa_WA_P_value_D_exudates_night_dunnett",
+                                                      "Porites Lobata_WA_P_value_D_exudates_night_dunnett",
+                                                      "Turf_WA_P_value_D_exudates_night_dunnett"),
+                                       p_values_dunnett_exudates_night)
+
+dunnett_FDR_exudates_night <- p_values_dunnett_exudates_night%>%
+  gather(feature_number, p_value, 2:ncol(.))
+
+dunnett_FDR_exudates_night$FDR_f <-p.adjust(dunnett_FDR_exudates_night$p_value, method = "BH")
+
+dunnett_sig_exudates_night <- dunnett_FDR_exudates_night%>%
+  filter(FDR_f, FDR_f < 0.05)%>%
+  dplyr::select(-p_value)%>%
+  spread(Organism, FDR_f)
+
+dunnett_night_sig_features <- as.vector(dunnett_sig_exudates_night$feature_number)
+
+# average organism exudate dataframe
+exudate_night_average_RA <- dorcierr_exudates_night_RA%>%
+  group_by(Organism)%>%
+  summarize_if(is.numeric, mean)%>%
+  gather(feature_number, RA, 2:ncol(.))%>%
+  spread(Organism, RA)
+
+exudate_night_difference_RA <- as.data.frame(
+  sapply(
+    exudate_night_average_RA[2:6],
+    function(x) x-exudate_night_average_RA$`Water control`))%>%
+  add_column(feature_number = exudate_night_average_RA$feature_number, .before = 1)
+
+exudate_night_percent_difference_RA <- as.data.frame(
+  sapply(exudate_night_average_RA[2:6],
+         function(x) (x-exudate_night_average_RA$`Water control`)/(x+exudate_night_average_RA$`Water control`)))%>%
+  add_column(feature_number = exudate_night_average_RA$feature_number, .before = 1)
+
+exudate_night_diff_columns_RA <- left_join(exudate_night_difference_RA, exudate_night_percent_difference_RA, by = 'feature_number', suffix = c("_diff", "_%diff"))%>%
+  filter(feature_number %like any% c(dunnett_night_sig_features))
+
+## adding in difference and percent difference to sig pvalues
+dunnett_night_sig_columns <- dunnett_sig_exudates_night%>%
+  add_column('CCA_diff_D_exudates_night_dunnett' = exudate_night_diff_columns_RA$CCA_diff, .after = 2)%>%
+  add_column('CCA_%diff_D_exudates_night_dunnett' = exudate_night_diff_columns_RA$`CCA_%diff`, .after = 3)%>%
+  add_column('Dictyota_diff_D_exudates_night_dunnett' = exudate_night_diff_columns_RA$Dictyota_diff, .after = 5)%>%
+  add_column('Dictyota_%diff_D_exudates_night_dunnett' = exudate_night_diff_columns_RA$`Dictyota_%diff`, .after = 6)%>%
+  add_column('Pocillopora verrucosa_diff_D_exudates_night_dunnett' = exudate_night_diff_columns_RA$`Pocillopora verrucosa_diff`, .after = 8)%>%
+  add_column('Pocillopora verrucosa_%diff_D_exudates_night_dunnett' = exudate_night_diff_columns_RA$`Pocillopora verrucosa_%diff`, .after = 9)%>%
+  add_column('Porites lobata_diff_D_exudates_night_dunnett' = exudate_night_diff_columns_RA$`Porites lobata_diff`, .after = 11)%>%
+  add_column('Porites lobata_%diff_D_exudates_night_dunnett' = exudate_night_diff_columns_RA$`Porites lobata_%diff`, .after = 12)%>%
+  add_column('Turf_diff_D_exudates_night_dunnett' = exudate_night_diff_columns_RA$Turf_diff, .after = 14)%>%
+  add_column('Turf_%diff_D_exudates_night_dunnett' = exudate_night_diff_columns_RA$`Turf_%diff`, .after = 15)
 
 # RR3 cleaning ------------------------------------------------------------
 rr3_wdf <- rr3%>%
@@ -670,12 +787,17 @@ rr3_wdf <- rr3%>%
   filter(Timepoint == 'TF')
 
 
-# RR3 Anova Organism ------------------------------------------------------
+rr3_day <- rr3_wdf%>%
+  filter(DayNight == "Day")
+
+rr3_night <- rr3_wdf%>%
+  filter(DayNight == "Night")
+# RR3 Day Anova Organism ------------------------------------------------------
 p_values_oneway_day_rr3 <- 
   as.data.frame(
     sapply(
-      rr3_wdf[6:ncol(rr3_wdf)],
-      function(x) summary(aov(x ~ rr3_wdf[["Organism"]]))[[1]][1,'Pr(>F)']))
+      rr3_day[6:ncol(rr3_day)],
+      function(x) summary(aov(x ~ rr3_day[["Organism"]]))[[1]][1,'Pr(>F)']))
 
 sig_one_way_day_rr3 <- p_values_oneway_day_rr3%>%
   rownames_to_column(var = "feature_number")%>%
@@ -685,11 +807,11 @@ sig_one_way_day_rr3 <- p_values_oneway_day_rr3%>%
 sig_features_day_rr3 <- as.factor(sig_one_way_day_rr3$feature_number)
 
 
-# RR3 Dunnetts ------------------------------------------------------------
-rr3_day_dunnetts <- rr3_wdf%>%
+# RR3 Day Dunnetts ------------------------------------------------------------
+rr3_day_dunnetts <- rr3_day%>%
   dplyr::select(c(1:5, sig_features_day_rr3))%>%
   unite(org_rep, c("Organism", "Replicate"), sep = "_", remove = TRUE)%>%
-  gather(feature_name, asin, 5:4120)%>%
+  gather(feature_name, asin, 5:ncol(.))%>%
   spread(org_rep, asin)%>%
   add_column(sum = apply(.[5:22], 1, sum))%>%
   filter(!sum == 0)%>%
@@ -698,7 +820,7 @@ rr3_day_dunnetts <- rr3_wdf%>%
   spread(feature_name, asin)%>%
   separate(org_rep, c("Organism", "Replicate"), sep = "_", remove = TRUE)
 
-dunnett_model_rrday <- lapply(rr3_day_dunnetts[6:3788], function(y, f)
+dunnett_model_rrday <- lapply(rr3_day_dunnetts[6:ncol(rr3_day_dunnetts)], function(y, f)
   summary(glht(aov(y ~ f, rr3_day_dunnetts), 
                linfct = mcp(f = "Dunnett"))),
   f = 
@@ -731,7 +853,7 @@ dunnett_sig_rr3_day <- dunnett_FDR_rr3_day%>%
 dunnett_rr3_sig_features <- as.vector(dunnett_sig_rr3_day$feature_number)
 
 
-# RR3_RA columns ---------------------------------------------------------
+# RR3_RA Day columns ---------------------------------------------------------
 rr3_average_RA <- rr3_day_RA%>%
   group_by(Organism)%>%
   summarize_if(is.numeric, mean)%>%
@@ -767,13 +889,13 @@ rr3_dunnett_sig_columns <- dunnett_sig_rr3_day%>%
   add_column('Turf_%diff_rr3_day_dunnett' = rr3_diff_columns_RA$`Turf_%diff`, .after = 15)
 
 
-# RR3 Tukeys -------------------------------------------------------------
-tukey_model_rrday <- sapply(rr3_day_dunnetts[6:3788], function(x)
+# RR3 Day Tukeys -------------------------------------------------------------
+tukey_model_rrday <- sapply(rr3_day_dunnetts[6:ncol(rr3_day_dunnetts)], function(x)
   TukeyHSD(aov(x ~ rr3_day_dunnetts$Organism, data = rr3_day_dunnetts), p.adjust.methods = "BH"))
 
 p_values_tukey_rr3_day <- as.data.frame(tukey_model_rrday)%>%
   rownames_to_column(var = "variable")%>%
-  gather(feature_info, value, 2:15133)%>%
+  gather(feature_info, value, 2:ncol(.))%>%
   filter(feature_info %like% '%p.adj%')%>%
   filter(value, value < 0.05)
 
@@ -788,8 +910,11 @@ sig_tukey_rr3_day <- p_values_tukey_rr3_day%>%
 tukey_sig_figs <- as.vector(sig_tukey_rr3_day%>% spread(column_names, value))$feature_number
 
 ## This part is cheesy. I am letting Tukey calculate diff for me for RA values. P_values not pulled form this test
-diff_model_rrra <- sapply(rr3_day_RA[6:ncol(rr3_day_RA)], function(x)
-  TukeyHSD(aov(x ~ rr3_day_RA$Organism, data = rr3_day_RA)))
+rr3_day_filtered_RA <- rr3_day_RA%>%
+  dplyr::select(1:5, c(tukey_sig_figs))
+
+diff_model_rrra <- sapply(rr3_day_filtered_RA[6:ncol(rr3_day_filtered_RA)], function(x)
+  TukeyHSD(aov(x ~ rr3_day_filtered_RA$Organism, data = rr3_day_filtered_RA)))
 
 diff_tukey_rr3_day <- as.data.frame(diff_model_rrra)%>%
   rownames_to_column(var = "variable")%>%
@@ -798,7 +923,7 @@ diff_tukey_rr3_day <- as.data.frame(diff_model_rrra)%>%
 
 diff_tukey_rr3_day$feature_info <- diff_tukey_rr3_day$feature_info%>%
   gsub("X", "", .)%>%
-  gsub("rr3_day_RA.Organism.diff", "diff_rr3_tukey_day", .)
+  gsub("rr3_day_filtered_RA.Organism.diff", "diff_rr3_tukey_day", .)
 
 sig_diff_tukey_rr3_day <- diff_tukey_rr3_day%>%
   separate(feature_info, c("feature_number", "test_info"), sep = "\\.")%>%
@@ -810,17 +935,167 @@ rr3_tukey_sig_columns <- bind_rows(sig_tukey_rr3_day, sig_diff_tukey_rr3_day)%>%
   arrange(column_names)%>%
   spread(column_names, value)
 
+# RR3 night Anova Organism ------------------------------------------------------
+p_values_oneway_night_rr3 <- 
+  as.data.frame(
+    sapply(
+      rr3_night[6:ncol(rr3_night)],
+      function(x) summary(aov(x ~ rr3_night[["Organism"]]))[[1]][1,'Pr(>F)']))
+
+sig_one_way_night_rr3 <- p_values_oneway_night_rr3%>%
+  rownames_to_column(var = "feature_number")%>%
+  rename('p_value' = 2)%>%
+  filter(p_value, p_value < 0.05)
+
+sig_features_night_rr3 <- as.factor(sig_one_way_night_rr3$feature_number)
+
+
+# RR3 night Dunnetts ------------------------------------------------------------
+rr3_night_dunnetts <- rr3_night%>%
+  dplyr::select(c(1:5, sig_features_night_rr3))%>%
+  unite(org_rep, c("Organism", "Replicate"), sep = "_", remove = TRUE)%>%
+  gather(feature_name, asin, 5:ncol(.))%>%
+  spread(org_rep, asin)%>%
+  add_column(sum = apply(.[5:22], 1, sum))%>%
+  filter(!sum == 0)%>%
+  dplyr::select(-sum)%>%
+  gather(org_rep, asin, 5:22)%>%
+  spread(feature_name, asin)%>%
+  separate(org_rep, c("Organism", "Replicate"), sep = "_", remove = TRUE)
+
+dunnett_model_rrnight <- lapply(rr3_night_dunnetts[6:ncol(rr3_night_dunnetts)], function(y, f)
+  summary(glht(aov(y ~ f, rr3_night_dunnetts), 
+               linfct = mcp(f = "Dunnett"))),
+  f = 
+    as.factor(
+      relevel(
+        factor(rr3_night_dunnetts$Organism), "Water control")))
+
+p_values_dunnett_rr3_night <- as.data.frame(
+  sapply(
+    dunnett_model_rrnight,
+    function(x) x$test$pvalues))
+
+p_values_dunnett_rr3_night <- cbind("Organism" = c("CCA_WA_P_value_rr_night_dunnett",
+                                                 "Dictyota_WA_P_value_rr_night_dunnett", 
+                                                 "Pocillopora verrucosa_WA_P_value_rr_night_dunnett",
+                                                 "Porites Lobata_WA_P_value_rr_night_dunnett",
+                                                 "Turf_WA_P_value_rr_night_dunnett"),
+                                  p_values_dunnett_rr3_night)
+
+dunnett_FDR_rr3_night <- p_values_dunnett_rr3_night%>%
+  gather(feature_number, p_value, 2:ncol(.))
+
+dunnett_FDR_rr3_night$FDR_f <-p.adjust(dunnett_FDR_rr3_night$p_value, method = "BH")
+
+dunnett_sig_rr3_night <- dunnett_FDR_rr3_night%>%
+  filter(FDR_f, FDR_f < 0.05)%>%
+  dplyr::select(-p_value)%>%
+  spread(Organism, FDR_f)
+
+dunnett_rr3_night_sig_features <- as.vector(dunnett_sig_rr3_night$feature_number)
+
+
+# RR3_RA night columns ---------------------------------------------------------
+rr3_average_night_RA <- rr3_night_RA%>%
+  group_by(Organism)%>%
+  summarize_if(is.numeric, mean)%>%
+  gather(feature_number, RA, 2:ncol(.))%>%
+  spread(Organism, RA)
+
+rr3_difference_night_RA <- as.data.frame(
+  sapply(
+    rr3_average_night_RA[2:6],
+    function(x) x-rr3_average_night_RA$`Water control`))%>%
+  add_column(feature_number = rr3_average_night_RA$feature_number, .before = 1)
+
+rr3_percent_difference_night_RA <- as.data.frame(
+  sapply(rr3_average_night_RA[2:6],
+         function(x) (x-rr3_average_night_RA$`Water control`)/(x+rr3_average_night_RA$`Water control`)))%>%
+  add_column(feature_number = rr3_average_night_RA$feature_number, .before = 1)
+
+rr3_night_diff_columns_RA <- left_join(rr3_difference_night_RA, rr3_percent_difference_night_RA, by = 'feature_number', suffix = c("_diff", "_%diff"))%>%
+  filter(feature_number %like any% c(dunnett_rr3_night_sig_features))
+
+
+## adding in difference and percent difference to sig pvalues
+rr3_night_dunnett_sig_columns <- dunnett_sig_rr3_night%>%
+  add_column('CCA_diff_rr3_night_dunnett' = rr3_night_diff_columns_RA$CCA_diff, .after = 2)%>%
+  add_column('CCA_%diff_rr3_night_dunnett' = rr3_night_diff_columns_RA$`CCA_%diff`, .after = 3)%>%
+  add_column('Dictyota_diff_rr3_night_dunnett' = rr3_night_diff_columns_RA$Dictyota_diff, .after = 5)%>%
+  add_column('Dictyota_%diff_rr3_night_dunnett' = rr3_night_diff_columns_RA$`Dictyota_%diff`, .after = 6)%>%
+  add_column('Pocillopora verrucosa_diff_rr3_night_dunnett' = rr3_night_diff_columns_RA$`Pocillopora verrucosa_diff`, .after = 8)%>%
+  add_column('Pocillopora verrucosa_%diff_rr3_night_dunnett' = rr3_night_diff_columns_RA$`Pocillopora verrucosa_%diff`, .after = 9)%>%
+  add_column('Porites lobata_diff_rr3_night_dunnett' = rr3_night_diff_columns_RA$`Porites lobata_diff`, .after = 11)%>%
+  add_column('Porites lobata_%diff_rr3_night_dunnett' = rr3_night_diff_columns_RA$`Porites lobata_%diff`, .after = 12)%>%
+  add_column('Turf_diff_rr3_night_dunnett' = rr3_night_diff_columns_RA$Turf_diff, .after = 14)%>%
+  add_column('Turf_%diff_rr3_night_dunnett' = rr3_night_diff_columns_RA$`Turf_%diff`, .after = 15)
+
+
+# RR3 Night Tukeys -------------------------------------------------------------
+tukey_model_rrnight <- sapply(rr3_night_dunnetts[6:ncol(rr3_night_dunnetts)], function(x)
+  TukeyHSD(aov(x ~ rr3_night_dunnetts$Organism, data = rr3_night_dunnetts), p.adjust.methods = "BH"))
+
+p_values_tukey_rr3_night <- as.data.frame(tukey_model_rrnight)%>%
+  rownames_to_column(var = "variable")%>%
+  gather(feature_info, value, 2:ncol(.))%>%
+  filter(feature_info %like% '%p.adj%')%>%
+  filter(value, value < 0.05)
+
+p_values_tukey_rr3_night$feature_info <- p_values_tukey_rr3_night$feature_info%>%
+  gsub("X", "", .)%>%
+  gsub("rr3_night_dunnetts.Organism.p.adj", "adj_p_rr3_tukey_night", .)
+
+sig_tukey_rr3_night <- p_values_tukey_rr3_night%>%
+  separate(feature_info, c("feature_number", "test_info"), sep = "\\.")%>%
+  unite(column_names, c(variable, test_info), sep = "_")
+
+tukey_night_sig_figs <- as.vector(sig_tukey_rr3_night%>% spread(column_names, value))$feature_number
+
+## This part is cheesy. I am letting Tukey calculate diff for me for RA values. P_values not pulled form this test
+rr3_night_filtered_RA <- rr3_night_RA%>%
+  dplyr::select(1:5, c(tukey_night_sig_figs))
+
+diff_model_rrra_night <- sapply(rr3_night_filtered_RA[6:ncol(rr3_night_filtered_RA)], function(x)
+  TukeyHSD(aov(x ~ rr3_night_filtered_RA$Organism, data = rr3_night_filtered_RA)))
+
+diff_tukey_rr3_night <- as.data.frame(diff_model_rrra_night)%>%
+  rownames_to_column(var = "variable")%>%
+  gather(feature_info, value, 2:ncol(.))%>%
+  filter(feature_info %like% '%diff%')
+
+diff_tukey_rr3_night$feature_info <- diff_tukey_rr3_night$feature_info%>%
+  gsub("X", "", .)%>%
+  gsub("rr3_night_filtered_RA.Organism.diff", "diff_rr3_tukey_night", .)
+
+sig_diff_tukey_rr3_night <- diff_tukey_rr3_night%>%
+  separate(feature_info, c("feature_number", "test_info"), sep = "\\.")%>%
+  unite(column_names, c(variable, test_info), sep = "_")%>%
+  filter(feature_number %like any% c(tukey_night_sig_figs))
+
+## combining diff and p_value columns
+rr3_night_tukey_sig_columns <- bind_rows(sig_tukey_rr3_night, sig_diff_tukey_rr3_night)%>%
+  arrange(column_names)%>%
+  spread(column_names, value)
+
 # Adding all stat columns into the feature_table_wdf ----------------------
 feature_table_wdf_stats <- full_join(
   full_join(
     full_join(
       full_join(
         full_join(
-          full_join(feature_table_wdf, dunnett_sig_columns, by = "feature_number"),
-          timepoint_anova_sigs, by = "feature_number"),
-        spiffy_sig_columns, by = "feature_number"),
-      spiffy_rare_byreeflocal, by = "feature_number"),
-    rr3_dunnett_sig_columns, by = "feature_number"),
-  rr3_tukey_sig_columns, by = "feature_number")
+          full_join(
+            full_join(
+              full_join(
+                full_join(feature_table_wdf, dunnett_sig_columns, by = "feature_number"),
+                dunnett_night_sig_columns, by = "feature_number"),
+              timepoint_anova_sigs, by = "feature_number"),
+            spiffy_sig_columns, by = "feature_number"),
+          spiffy_rare_byreeflocal, by = "feature_number"),
+        rr3_dunnett_sig_columns, by = "feature_number"),
+      rr3_tukey_sig_columns, by = "feature_number"),
+    rr3_night_dunnett_sig_columns, by = "feature_number"),
+  rr3_night_tukey_sig_columns, by = "feature_number")
+
 
 write_csv(feature_table_wdf_stats, "feature_table_master_post_stats.csv")
