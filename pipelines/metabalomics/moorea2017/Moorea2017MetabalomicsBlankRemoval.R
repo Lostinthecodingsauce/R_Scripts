@@ -328,7 +328,7 @@ rr3_night_RA <- moorea_wdf_RA%>%
 
 
 # Spiffy Cleaning and Subsetting-----------------------------------------------------
-spiffy_wdf <- spiffy%>%
+spiffy_almost_wdf <- spiffy%>%
   add_column(reef_area = spiffy$Organism, .before = 3)%>%
   rename(`Site` =`Organism`)%>%
   mutate(reef_area = case_when(reef_area == 1 ~ "bay",
@@ -344,6 +344,20 @@ spiffy_wdf <- spiffy%>%
                                reef_area == 11 ~ "backreef",
                                reef_area == 12 ~ "backreef",
                                TRUE ~ "Forereef"))
+
+spiffy_rep_noise <- spiffy_almost_wdf%>%
+  gather(feature_number, asin, 5:ncol(.))%>%
+  add_column("binary" = 1)%>%
+  group_by(Site, feature_number)%>%
+  filter(., asin != 0.00)%>%
+  summarize_if(is.numeric, sum)%>%
+  filter(binary == 2)%>%
+  ungroup()
+
+spiffY_real_features <- as.vector(spiffy_rep_noise$feature_number)
+
+spiffy_wdf <- spiffy_almost_wdf%>%
+  dplyr::select(c(1:4, spiffY_real_features))
 
 
 spiffy_no_bay <-spiffy_wdf%>%
@@ -368,6 +382,8 @@ spiffy_no_bay_RA <- moorea_wdf_RA%>%
                                reef_area == 12 ~ "backreef",
                                TRUE ~ "Forereef"))%>%
   filter(!reef_area == "bay")
+
+
 
 # Spiffy Oneway Anova -----------------------------------------------------
 ## One way anova looking at only backreef and fore reef
