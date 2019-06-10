@@ -4,7 +4,6 @@
 
 ## Before you can run this you have to change any of the read.tsv or read.csv to the file you are wanting to read
 ## If you are not using CANOPUS, SIRIUS or Zodiac make sure you comment out those lines
-## LINE 123-130 need to be changed so you define your blank and sample columns
 
 # Loading libraries -------------------------------------------------------
 #Data mungering
@@ -16,43 +15,81 @@ library(readxl)
 library(multcomp)
 
 
+## Define your dataframes ---------------------------------------------------
+
+# True hits library AS TSV
+library_hits <- "Library-hits.tsv"
+
+# Analog hits AS TSV
+analog_hit_df <- "Analog-hits.tsv"
+
+# Node info AS TSV
+node_info_df <- "Node_info.tsv"
+
+## CANOPUS will have two dataframes
+# Canopus classes which is the type of chemical-ish that the feature most likely is. AS CSV
+canopus_classes <- "Canopus_classes.csv"
+
+#Canopus chemont annotations is the dataframe with strings for each chemical fucntional groups. AS CSV
+canopus_functional_groups <- "categories.canopus.strings.CSV"
+
+#Sirius and zodiac dataframe. Someitmes will come pre-combined as it is in this pipeline. AS CSV
+sirius_zodiac_raw <- "SIRIUS_Zodiac_converted.csv"
+
+## Feature table exported from MzMine with areas under the peak. AS CSV
+gap_filled_feature_table <- "Feature_table_GapFilled.csv"
+
+# MS sample codes. AS CSV
+sample_codes <- "MS_SampleCodes.csv"
+
+## Now in the MS sample codes data frame define where the samples and blanks are
+## However, add 1 to the row number.
+## So if you want to select the first through the 10th row it should actually be 2:11
+
+# define row of all samples
+ions_samples <- 10:259
+
+## define row of all blanks
+ions_blanks <- c(2:8, 260)
+
+
 # Reading in Dataframes ---------------------------------------------------------
 # True hits and analog hits are exported CSVs from GNPS
 # True hits are more strictly matched to the library
 # True hits, analog hits and node info data sheets should all be included in every single run
-true_hits <- read_tsv("Library-hits.tsv")%>%
+true_hits <- read_tsv(library_hits)%>%
   rename("feature_number" = '#Scan#')
 
-analog_hits <- read_tsv("Analog-hits.tsv")%>%
+analog_hits <- read_tsv(analog_hit_dfs)%>%
   rename("feature_number" = '#Scan#')
 
 # Node info includes networking information about each feature
-node_info <- read_tsv("Node_info.tsv")%>%
+node_info <- read_tsv(node_info_df)%>%
   rename('feature_number' = 'cluster index',
          'network' = 'componentindex')
 
 # Canopus tries to classify each feature
 # Canopus, Sirius and Zodiac are all computer learning programs which assign probable chemical formulas
 # There are optional. If you did not run them then comment out the below lines
-canopus_anotations <- read_csv("Canopus_classes.csv")
+canopus_anotations <- read_csv(canopus_classes)
 
-chemont_anotations <- read_csv("categories.canopus.strings.CSV")%>%
+chemont_anotations <- read_csv(canopus_functional_groups)%>%
   rename('canopus_annotation' = 'name')
 
 # Sirius and Zodiac both try to assign molecular formulas to all the features
 # The first 13 columns are the top most likely annotations. If you want to also look at the less likely hits
 # comment out the dplyr::select line. It will have a lot of columns 413-ish
-sirius_zodiac_anotations <- read_csv("SIRIUS_Zodiac_converted.csv")%>%
+sirius_zodiac_anotations <- read_csv(sirius_zodiac_raw)%>%
   rename(feature_number = 1)%>%
   dplyr::select(-c(14:ncol(.)))
 
 # Feature table has all features found within the experiments and blanks
 # The columns need to be changed to the actual experiment sample codes
 # Feature_table_raw is the raw export from MZMine
-feature_table_raw <- read_csv("Feature_table_GapFilled.csv")%>%    ##Change this to your .csv
+feature_table_raw <- read_csv(gap_filled_feature_table)%>%    ##Change this to your .csv
   rename('feature_number' = 'row ID')
 
-ms_sample_codes <- read_csv("MS_SampleCodes.csv")%>%      ## Change this to your sample code .csv
+ms_sample_codes <- read_csv(sample_codes)%>%      ## Change this to your sample code .csv
   rename('run_code' = 'Sample ID',
          'sample_code' = 'Sample Name')
 
@@ -110,17 +147,6 @@ feature_table_dirty <- left_join(ms_sample_codes, feature_table_temp, by = "run_
   #This would be the situation where you run someones samples in your run but dont want their blanks or dumb features
   gather(feature_number, ion_charge, 2:ncol(.))%>%
   spread(sample_code, ion_charge)
-
-
-
-## Define the columns where your samples and blanks are --------------------
-# After you make feature_table_dirty look and find the columns and input them all here
-
-## defining what columns the samples are in
-ions_samples <- 10:259
-
-## defining different blanks
-ions_blanks <- c(2:8, 260)
 
 
 ## flagging background features and subtraction from samples ------------------------------------------------
