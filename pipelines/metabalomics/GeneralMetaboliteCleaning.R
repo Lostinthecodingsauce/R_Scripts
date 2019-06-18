@@ -2,7 +2,8 @@
 ## Written by Zach Quinlan March 2019
 ## Editted June 2019
 
-## Before you can run this you have to change any of the read.tsv or read.csv to the file you are wanting to read
+## Before you can run this you have to change any of the read.tsv or read.csv 
+##    to the file tpye you are wanting to read.
 ## If you are not using CANOPUS, SIRIUS or Zodiac make sure you comment out those lines
 
 # Loading libraries -------------------------------------------------------
@@ -54,7 +55,7 @@ ions_blanks <- c(2:8, 260)
 
 
 # Reading in Dataframes ---------------------------------------------------------
-# True hits and analog hits are exported CSVs from GNPS
+# True hits and analog hits are exported TSVs from GNPS
 # True hits are more strictly matched to the library
 # True hits, analog hits and node info data sheets should all be included in every single run
 true_hits <- read_tsv(library_hits)%>%
