@@ -62,6 +62,11 @@ pairwiseAdonis::pairwise.adonis(la_jolla_sharks_s1[ljs_asin], la_jolla_sharks$Ye
 adonis(la_jolla_sharks_s1[ljs_asin] ~ Year, la_jolla_sharks_s1, p.adjust.m = "BH")
 
 
+# SIMPER ------------------------------------------------------------------
+simper_ljs_s1 <- simper(la_jolla_sharks_s1[ljs_asin], la_jolla_sharks_s1$Year, permutations = 0, trace = FALSE)
+
+summary(simper_ljs_s1)
+
 # ANOVA -------------------------------------------------------------------
 p_values_oneway_sharks_functional <- 
   as.data.frame(
@@ -130,5 +135,5 @@ write_csv(la_jolla_sharks_s1, "LaJolla_sharks_master_subsystem1.csv")
 
 write_csv(p_values_tukey_functional_sharks, "LaJolla_sharks_tukey_pvalues.csv")
 
-
+write_csv(simper_ljs_s1, "LaJolla_sharks_SimperValues.csv")
 
