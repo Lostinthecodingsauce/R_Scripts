@@ -126,6 +126,8 @@ ggplot(pco_scores_functional, mapping = aes(Axis.1, Axis.2, col = pco_scores_fun
 # Writing Dataframes to csv -----------------------------------------------
 write_csv(master_functional_s1_wdf, "Master_functionalgroups_RA_asin_subsystem1.csv")
 
+write_csv(la_jolla_sharks_s1, "LaJolla_sharks_master_subsystem1.csv")
+
 write_csv(p_values_tukey_functional_sharks, "LaJolla_sharks_tukey_pvalues.csv")
 
 
