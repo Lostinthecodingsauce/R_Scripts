@@ -489,7 +489,7 @@ dorcierr_exudates_night <- dorcierr_wdf%>%
          Timepoint == "T0")
 
 dorcierr_remins_day <- dorcierr_wdf%>%
-  filter(DayNight == "Night")
+  filter(!DayNight == "Night")
 ## Need to take the mean of T0 to subtract from TF because of the differences in replicate
 ## This section needs to be redone because it is outdated
 dorcierr_transformations <- dorcierr_wdf_RA%>%

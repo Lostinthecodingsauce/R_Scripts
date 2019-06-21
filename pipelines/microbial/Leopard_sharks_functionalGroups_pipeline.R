@@ -8,17 +8,21 @@ library(wesanderson)
 library(readxl)
 
 
+# Loading in ALL data frames ----------------------------------------------
 master_functionalgroups_s1_raw <- read_excel("Master_FG_lvl1_Data_Raw.xlsx")
 master_metadata <- read_excel("Master_FG_lvl1_Metadata_Raw.xlsx")%>%
   rename(sample_name = Sample)
 
+master_bacteria_clades <- read_csv("All_Taxa_Leopard_Master_Redone_Aquarium.csv")
+  
 
-# Data Cleaning -----------------------------------------------------------
+# Data Cleaning Functional Groups-----------------------------------------------------------
 ##  This is transposing your data. So now functional genes will be columns and samples will be rows
 ls_tranfg <-master_functionalgroups_s1_raw %>%
   gather(sample_name, RA, 2:ncol(.))%>%
   spread('Subsystem 1', RA)%>%
   add_column(TR = apply(.[2:ncol(.)], 1, sum))
+
 
 # Relative abundance
 feature_relative_abundance <- 
@@ -36,6 +40,8 @@ feature_asin_sqrt <-
       function(x) asin(sqrt(x))))%>%
   add_column(sample_name = ls_tranfg$sample_name)
 
+
+#Joining RA and angular transformed data for 
 RA_asin_df <- left_join(feature_relative_abundance, feature_asin_sqrt, by = 'sample_name',
                         suffix = c(".RA", ".asin"))%>%
   dplyr::select(-c("TR.RA", "TR.asin"))
@@ -45,7 +51,7 @@ RA_asin_df <- left_join(feature_relative_abundance, feature_asin_sqrt, by = 'sam
 master_functional_s1_wdf <- left_join(master_metadata, RA_asin_df, by = "sample_name")%>%
   filter(!sample_name == "LS 2 2015 LJ")
 
-# Subsetting Data Frames --------------------------------------------------
+# Subsetting Data Frames Functional Groups --------------------------------------------------
 la_jolla_sharks_s1 <- master_functional_s1_wdf%>%
   filter(Location == "La Jolla",
          Group == "Leopard Shark")
@@ -54,7 +60,7 @@ ljs_meta <- 1:5
 ljs_RA <-6:40
 ljs_asin <- 41:75
 
-# PERMANOVA ---------------------------------------------------------------
+# PERMANOVA  Functional Groups---------------------------------------------------------------
 #Pairwise
 pairwiseAdonis::pairwise.adonis(la_jolla_sharks_s1[ljs_asin], la_jolla_sharks$Year, p.adjust.m = "BH")
 
@@ -62,12 +68,12 @@ pairwiseAdonis::pairwise.adonis(la_jolla_sharks_s1[ljs_asin], la_jolla_sharks$Ye
 adonis(la_jolla_sharks_s1[ljs_asin] ~ Year, la_jolla_sharks_s1, p.adjust.m = "BH")
 
 
-# SIMPER ------------------------------------------------------------------
+# SIMPER  Functional Groups------------------------------------------------------------------
 simper_ljs_s1 <- simper(la_jolla_sharks_s1[ljs_asin], la_jolla_sharks_s1$Year, permutations = 0, trace = FALSE)
 
 summary(simper_ljs_s1)
 
-# ANOVA -------------------------------------------------------------------
+# ANOVA  Functional Groups-------------------------------------------------------------------
 p_values_oneway_sharks_functional <- 
   as.data.frame(
     sapply(
@@ -82,7 +88,7 @@ sig_ljs_s1 <- p_values_oneway_sharks_functional%>%
 sig_features_ljs_s1 <- as.vector(sig_ljs_s1$Subsystem_1)
 
 
-# Tukeys ------------------------------------------------------------------
+# Tukeys  Functional Groups------------------------------------------------------------------
 ljs_s1_tukey_cleaning <- la_jolla_sharks_s1%>%
   dplyr::select(c(sig_features_ljs_s1))%>%
   add_column(Year = as.factor(la_jolla_sharks_s1$Year), .before = 1)
@@ -100,7 +106,7 @@ p_values_tukey_functional_sharks$gene_info <- p_values_tukey_functional_sharks$g
   gsub(".ljs_s1_tukey_cleaning.Year.p.adj", "", .)
 
 
-# PCoA --------------------------------------------------------------------
+# PCoA Functional Groups--------------------------------------------------------------------
 veg_bray <- vegdist(la_jolla_sharks_s1[ljs_asin], "bray") #Bray-curtis distances
 
 pc_scores<-pcoa(veg_bray) #Calculating scores
@@ -128,7 +134,7 @@ ggplot(pco_scores_functional, mapping = aes(Axis.1, Axis.2, col = pco_scores_fun
   title("Sharks in La Jolla")
 
 
-# Writing Dataframes to csv -----------------------------------------------
+# Writing Functional Group Dataframes to csv -----------------------------------------------
 write_csv(master_functional_s1_wdf, "Master_functionalgroups_RA_asin_subsystem1.csv")
 
 write_csv(la_jolla_sharks_s1, "LaJolla_sharks_master_subsystem1.csv")
@@ -136,4 +142,24 @@ write_csv(la_jolla_sharks_s1, "LaJolla_sharks_master_subsystem1.csv")
 write_csv(p_values_tukey_functional_sharks, "LaJolla_sharks_tukey_pvalues.csv")
 
 write_csv(simper_ljs_s1, "LaJolla_sharks_SimperValues.csv")
+
+
+####### Cleaning Dataframes for Taxonomy ########----------------------------------------
+ls_genera <- master_bacteria_clades%>%
+  gather(sample_name, RA, 2:ncol(.))%>%
+  spread(1, RA)
+
+# angular transformation of RA THIS PART IS FUCKED CAUSE FOCUS DOES SOME TRANSFORMATION BUT I DO NOT KNOW WHAT IT IS.
+# COLTON NEEDS TO CHECK THIS FOR ME.
+genera_asin_sqrt <-
+  as.data.frame(
+    sapply(
+      ls_genera[2:ncol(ls_genera)],
+      function(x) asin(sqrt(x))))%>%
+  add_column(sample_name = ls_genera$sample_name)
+
+## Joining RA and Asin together
+genera_RA_asin <- left_join(ls_genera, genera_asin_sqrt, by = "sample_name", suffix = c(".RA", ".asin"))
+
+
 
