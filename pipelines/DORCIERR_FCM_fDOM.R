@@ -9,6 +9,7 @@ library(DescTools)
 library(broom)
 library(readxl)
 library(multcomp)
+library(CHNOSZ)
 
 #PCoA, PERMANOVA
 library(vegan)
@@ -34,8 +35,19 @@ feature_metadata <- read_csv("moorea_feature_table_master_post_filtered.csv")%>%
   dplyr::select(1:68)
 
 
-networking <- feature_metadata[c(1,17,23, 26, 33, 38, 29)]
-networking$feature_number <- as.character(networking$feature_number)
+network_id <- feature_metadata[c(1,17,23, 26, 33, 38, 29)]
+network_id$feature_number <- as.character(network_id$feature_number)
+
+networking_elements <- network_id%>%
+  filter(!SiriusMF == "NA")%>%
+  group_by(feature_number)%>% 
+  do(., rownames_to_column(as.data.frame(makeup(.$SiriusMF, multiplier = 1), var = "element")))%>%
+  spread(rowname, 3)
+
+networking_elements[is.na(networking_elements)] <- 0
+
+networking <-left_join(network_id, networking_elements, by = "feature_number")
+
 
 # Subsetting to FCM or fDOM -----------------------------------------------
 fdom_wdf <- dorc_fcm_fdom%>%
@@ -162,16 +174,17 @@ two_way_tidy$FDR <- p.adjust(two_way_tidy$f_value, method = "BH")
 two_way_signignificant <- two_way_tidy%>%
   filter(FDR < 0.05)
 
-#Save siginificant values from test to a vector to filter out for post-hoc tests
+# Save siginificant values from test to a vector to filter out for post-hoc tests
+# For timepoint only care about ones which differ by species and timepoint not just timepoint
 significant_organism_dom <- as.vector(two_way_signignificant%>% filter(anova_test == "Organism"))$feature
-significant_Timepoint_dom <- as.vector(two_way_signignificant%>% filter(anova_test == "Timepoint"))$feature
+significant_Timepoint_dom <- as.vector(two_way_signignificant%>% filter(anova_test == "Organism*Timepoint"))$feature
 
 
 ## Writing the actual significance table to a folder
 write_csv(two_way_signignificant, "~/Documents/SDSU/DORCIERR/Datasets/stats/Dorcierr_two_way_significant.csv")
 
 
-# DOM Post-Hoc Tests ------------------------------------------------------
+# DOM Organism Post-Hoc Tests ------------------------------------------------------
 ## Making Post-Hoc dataframes filtering for significant p_values from Two-Way Anova
 dom_organism_post_hoc <- dom_stats_wdf%>%
   dplyr::select(c(1:4, significant_organism_dom))
@@ -211,7 +224,8 @@ dom_timepoint_post_hoc <- dom_stats_wdf%>%
 ## Running Dunnetts only both T0 and TF
 set.seed(2005)
 
-#Exudates T0
+
+# Exudates T0 -------------------------------------------------------------
 dom_org_dunnetts_exudates <- lapply(dom_organism_exudates_ph[4:ncol(dom_organism_exudates_ph)], function(y, f)
   summary(glht(aov(y ~ f, dom_organism_exudates_ph), 
                linfct = mcp(f = "Dunnett"))),
@@ -244,15 +258,114 @@ dom_dunnett_sig_exudates <- dom_dunnetts_FDR_exudates%>%
 
 dunnett_sig_features_exudates <- as.vector(dom_dunnett_sig_exudates$feature_number)
 
-# Remineralized TF
-dom_org_dunnetts_remins <- lapply(dom_organism_remineralized_ph[4:ncol(dom_organism_remineralized_ph)], function(y, f)
-  summary(glht(aov(y ~ f, dom_organism_remineralized_ph), 
-               linfct = mcp(f = "Dunnett"))),
-  f = 
-    as.factor(
-      relevel(
-        factor(dom_organism_remineralized_ph$Organism), "Water control")))
+dom_dunnett_exudates_networking <- right_join(networking, dom_dunnett_sig_exudates, by = "feature_number")
 
+
+# Finding unique exudates to organisms ------------------------------------
+dom_dunnett_exudates_networking[is.na(dom_dunnett_exudates_networking)] <- 0
+
+exudates <- dom_dunnett_exudates_networking[15:19]
+
+exudates[exudates > 0] <- 1
+
+exudates <- add_column(exudates, sum = apply(exudates, 1, sum))%>%
+  add_column(feature_number = dom_dunnett_exudates_networking$feature_number)%>%
+  filter(.$sum == 1)%>%
+  dplyr::select(-sum)
+
+exudates$max <- colnames(exudates)[max.col(exudates[1:5])]
+
+poc_exudates_only <- exudates%>%
+  filter(max == "Pocillopora verrucosa")
+
+por_exudates_only <- exudates%>%
+  filter(max == "Porites Lobata")
+
+cca_exudates_only <- exudates%>%
+  filter(max == "CCA")
+
+dic_exudates_only <- exudates%>%
+  filter(max == "Dictyota")
+
+trf_exudates_only <- exudates%>%
+  filter(max == "Turf")
+
+
+# Pocillopora exudates
+poc_exudates <- right_join(dom_dunnett_exudates_networking, poc_exudates_only[6], by = "feature_number")
+
+poc_elements <- poc_exudates[8:14]%>%
+  # summarize_if(is.numeric, mean)%>%
+  # gather(element, average, 1:ncol(.))%>%
+  add_column(Organism = "Pocillopora Verrucosa", .before = 1)
+
+# CCA exudates
+cca_exudates <- right_join(dom_dunnett_exudates_networking, cca_exudates_only[6], by = "feature_number")
+
+cca_elements <- cca_exudates[8:14]%>%
+  # summarize_if(is.numeric, mean)%>%
+  # gather(element, average, 1:ncol(.))%>%
+  add_column(Organism = "CCA", .before = 1)
+
+# Porites exudates
+por_exudates <- right_join(dom_dunnett_exudates_networking, por_exudates_only[6], by = "feature_number")
+
+por_elements <- por_exudates[8:14]%>%
+  # summarize_if(is.numeric, mean)%>%
+  # gather(element, average, 1:ncol(.))%>%
+  add_column(Organism = "Porites lobata", .before = 1)
+
+# Dictyota Exudates
+dic_exudates <- right_join(dom_dunnett_exudates_networking, dic_exudates_only[6], by = "feature_number")
+
+dic_elements <- dic_exudates[8:14]%>%
+  # summarize_if(is.numeric, mean)%>%
+  # gather(element, average, 1:ncol(.))%>%
+  add_column(Organism = "Dictyota", .before = 1)
+
+# Turf Exudates
+trf_exudates <- right_join(dom_dunnett_exudates_networking, trf_exudates_only[6], by = "feature_number")
+
+trf_elements <- trf_exudates[8:14]%>%
+  # summarize_if(is.numeric, mean)%>%
+  # gather(element, average, 1:ncol(.))%>%
+  add_column(Organism = "Turf", .before = 1)
+
+
+## Combining tables back toghether
+mean_elemntal_composition <- bind_rows(poc_elements, por_elements, cca_elements, dic_elements, trf_elements)
+
+aov_elements <- as.data.frame(
+  sapply(mean_elemntal_composition[2:8], 
+         function(x) summary(
+           aov(x ~ mean_elemntal_composition[["Organism"]]))[[1]][1,'Pr(>F)']))%>%
+  rename(f_value = 1)%>%
+  rownames_to_column(var = "Organism")
+
+aov_elements$FDR <- p.adjust(aov_elements$f_value, method = "BH")
+
+## Tukey elements
+tukey_elements <- sapply(mean_elemntal_composition[c(2,4,6,7)], function(x)
+  TukeyHSD(aov(x ~ mean_elemntal_composition$Organism, data = mean_elemntal_composition), p.adjust.methods = "BH"))
+
+p_values_tukey_elements <- as.data.frame(tukey_elements)%>%
+  rownames_to_column(var = "variable")%>%
+  gather(feature_info, value, 2:ncol(.))%>%
+  filter(feature_info %like% '%p.adj%')%>%
+  filter(value, value < 0.05)
+
+p_values_tukey_elements$feature_info <- gsub(".mean_elemntal_composition.Organism.p.adj", "",
+                                             p_values_tukey_elements$feature_info)
+## Graphing
+graphing_elements <- mean_elemntal_composition%>%
+  gather(element, number, c(2,4,6,7))
+
+ggplot(graphing_elements, aes(x = Organism, y = number, fill = element))+
+  geom_bar(stat = "summary", fun.y = "mean")+
+  scale_color_manual(values=wes_palette(n=4, name="Darjeeling1"))
+  
+
+# Remineralized TF DOM ----------------------------------------------------
 pvals_dunn_org_remins_dom <- as.data.frame(
   sapply(
     dom_org_dunnetts_remins,
@@ -273,7 +386,7 @@ dom_dunnetts_FDR_remins$FDR_f <-p.adjust(dom_dunnetts_FDR_remins$p_value, method
 dom_dunnett_sig_remins <- dom_dunnetts_FDR_remins%>%
   filter(FDR_f, FDR_f < 0.05)%>%
   dplyr::select(-p_value)%>%
-  spread(Organism, FDR_f)%>%
+  spread(Organism, FDR_f)
 
 
 dunnett_sig_features_remin <- as.vector(dom_dunnett_sig_remins$feature_number)
@@ -281,21 +394,95 @@ dunnett_sig_features_remin <- as.vector(dom_dunnett_sig_remins$feature_number)
 dom_dunnett_remins_networking <- right_join(networking, dom_dunnett_sig_remins, by = "feature_number")
 
 
+
+# DOM Timepoint Post-hoc --------------------------------------------------
+dom_timepoint_post_hoc <- dom_stats_wdf%>%
+  dplyr::select(c(1:4, significant_Timepoint_dom))
+
+dom_timepoint <- dom_timepoint_post_hoc%>%
+  dplyr::select(-sample_name)%>%
+  unite(sample, c("Organism", "Timepoint", "Replicate"), sep = "_", remove = TRUE)%>%
+  gather(feature_name, asin, 2:ncol(.))%>%
+  spread(sample, asin)%>%
+  add_column(sum = apply(.[2:ncol(.)], 1, sum))%>%
+  filter(!sum == 0)%>%
+  dplyr::select(-sum)%>%
+  gather(sample, asin, 2:ncol(.))%>%
+  spread(feature_name, asin)%>%
+  separate(sample, c("Organism", "Timepoint", "Replicate"), sep = "_", remove = TRUE)
+
+## Timepoint grouped by organisms and one-way anova run
+timepoint_poc <- dom_timepoint%>%
+  filter(Organism == "Pocillopora verrucosa")
+
+timepoint_por <- dom_timepoint%>%
+  filter(Organism == "Porites lobata")
+
+timepoint_dic <- dom_timepoint%>%
+  filter(Organism == "Dictyota")
+
+timepoint_trf <- dom_timepoint%>%
+  filter(Organism == "Turf")
+
+timepoint_cca <- dom_timepoint%>%
+  filter(Organism == "CCA")
+
+aov_time_poc <- as.data.frame(sapply(timepoint_poc[4:ncol(timepoint_poc)], 
+                                     function(x) summary(
+                                       aov(x ~ timepoint_poc[["Timepoint"]]))[[1]][1,'Pr(>F)']))%>%
+  rownames_to_column(var = "feature_number")%>%
+  rename(p_value = 2)%>%
+  add_column(Organism = "Pocillopora", .before = 1)
+
+aov_time_por <- as.data.frame(sapply(timepoint_por[4:ncol(timepoint_por)], 
+                       function(x) summary(
+                         aov(x ~ timepoint_por[["Timepoint"]]))[[1]][1,'Pr(>F)']))%>%
+  rownames_to_column(var = "feature_number")%>%
+  rename(p_value = 2)%>%
+  add_column(Organism = "Porites", .before = 1)
+
+aov_time_dic <- as.data.frame(sapply(timepoint_dic[4:ncol(timepoint_dic)], 
+                       function(x) summary(
+                         aov(x ~ timepoint_dic[["Timepoint"]]))[[1]][1,'Pr(>F)']))%>%
+  rownames_to_column(var = "feature_number")%>%
+  rename(p_value = 2)%>%
+  add_column(Organism = "Dictyota", .before = 1)
+
+aov_time_trf <- as.data.frame(sapply(timepoint_trf[4:ncol(timepoint_trf)], 
+                       function(x) summary(
+                         aov(x ~ timepoint_trf[["Timepoint"]]))[[1]][1,'Pr(>F)']))%>%
+  rownames_to_column(var = "feature_number")%>%
+  rename(p_value = 2)%>%
+  add_column(Organism = "Turf", .before = 1)
+
+aov_time_cca <- as.data.frame(sapply(timepoint_cca[4:ncol(timepoint_cca)], 
+                       function(x) summary(
+                         aov(x ~ timepoint_cca[["Timepoint"]]))[[1]][1,'Pr(>F)']))%>%
+  rownames_to_column(var = "feature_number")%>%
+  rename(p_value = 2)%>%
+  add_column(Organism = "CCA", .before = 1)
+
+time_aovs <- bind_rows(aov_time_cca, aov_time_dic, aov_time_poc, aov_time_por, aov_time_trf)
+
+time_aovs$FDR <- p.adjust(time_aovs$p_value, method = "BH")
+
+time_aov_sigs <- time_aovs%>%
+  filter(FDR < 0.05)
+
+
+
+# One Way Anova FCM -------------------------------------------------------
+aov_fcm <-as.data.frame(
+  sapply(fcm_stats_df[c(4,6)], 
+         function(x) summary(
+           aov(x ~ fcm_stats_df[["Organism"]]))[[1]][1,'Pr(>F)']))%>%
+  rename(f_value = 1)%>%
+  rownames_to_column(var = "test")
+
+aov_fcm$FDR <- p.adjust(aov_fcm$f_value, method = "BH")
+
 # FCM Post-Hoc Tests ----------------------------------------------------------
-#Tukey on the rate change
-tukey_model_fcm <- 
-  TukeyHSD(
-    aov(
-      fcm_rate_t7_t0$log10_change_per_hour ~ fcm_rate_t7_t0$Organism, data = fcm_rate_t7_t0), 
-    p.adjust.methods = "BH")
-
-p_values_tukey_fcm <- as.data.frame(tukey_model_fcm$`fcm_rate_t7_t0$Organism`)%>%
-  rownames_to_column(var = "Organism")%>%
-  gather(feature_info, value, 2:ncol(.))%>%
-  filter(feature_info %like% "%p adj%")%>%
-  filter(value < 0.05)
-
-# growth rates for the first half of the expierment
+# Tukey growth rates for the first half of the expierment
 tukey_model_fcm_th <- 
   TukeyHSD(
     aov(
@@ -307,6 +494,21 @@ p_values_tukey_fcm_th <- as.data.frame(tukey_model_fcm_th$`fcm_rate_th_t0$Organi
   gather(feature_info, value, 2:ncol(.))%>%
   filter(feature_info %like% "%p adj%")%>%
   filter(value < 0.05)
+
+# Tukey TF FCM
+tukey_model_fcm_TF <- 
+  TukeyHSD(
+    aov(
+      fcm_t7$TF ~ fcm_t7$Organism, data = fcm_t7), 
+    p.adjust.methods = "BH")
+
+p_values_tukey_fcm_TF <- as.data.frame(tukey_model_fcm_TF$`fcm_t7$Organism`)%>%
+  rownames_to_column(var = "Organism")%>%
+  gather(feature_info, value, 2:ncol(.))%>%
+  filter(feature_info %like% "%p adj%")%>%
+  filter(value < 0.05)
+
+
 
 ## Visualizations to help explain data
 ggplot(fcm_rate_t7_t0, aes(x = Organism, y = log10_change_per_hour))+
