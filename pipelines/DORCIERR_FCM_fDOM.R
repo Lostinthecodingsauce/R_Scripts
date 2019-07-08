@@ -34,20 +34,31 @@ dorc_metab <- read_csv("DORCIERR_metabolomics_wdf.csv")
 feature_metadata <- read_csv("moorea_feature_table_master_post_filtered.csv")%>%
   dplyr::select(1:68)
 
+moorea_doc <- read_xlsx("MO17_ExpSummary_DOC.2018.04.04.xlsx")%>%
+  dplyr::select(1:2)%>%
+  rename(sample_name = 1)%>%
+  rename(DOC = 2)
+  
+
+feature_RA <- read_csv("DORCIERR_RA_wdf.dat")
+
 
 network_id <- feature_metadata[c(1,17,23, 26, 33, 38, 29)]
 network_id$feature_number <- as.character(network_id$feature_number)
 
 networking_elements <- network_id%>%
-  filter(!SiriusMF == "NA")%>%
+  filter(!ZodiacMF == "not_explainable")%>%
   group_by(feature_number)%>% 
-  do(., rownames_to_column(as.data.frame(makeup(.$SiriusMF, multiplier = 1), var = "element")))%>%
+  do(., rownames_to_column(as.data.frame(makeup(.$ZodiacMF, multiplier = 1), var = "element")))%>%
   spread(rowname, 3)
 
 networking_elements[is.na(networking_elements)] <- 0
 
-networking <-left_join(network_id, networking_elements, by = "feature_number")
+networking_energy <- networking_elements%>%
+  add_column(NOSC = (-((4*.$C + .$H - 3*.$N - 2*.$O + 5*.$P - 2*.$S)/.$C)+4))%>%
+  add_column(cox_gibbs_energy = 60.3-28.5*.$NOSC)
 
+networking <-left_join(network_id, networking_energy, by = "feature_number")
 
 # Subsetting to FCM or fDOM -----------------------------------------------
 fdom_wdf <- dorc_fcm_fdom%>%
@@ -59,8 +70,36 @@ fdom_wdf <- dorc_fcm_fdom%>%
          !Timepoint == "T5",
          !Timepoint == "T6")
 
+fdom_wdf$Replicate <- as.character(fdom_wdf$Replicate)
+
 fcm_wdf <- dorc_fcm_fdom%>%
   dplyr::select(c(1:7,33:ncol(.)))
+
+# Relative Abundance data cleaning ----------------------------------------
+## Need to find difference between T0 and TF for each organism
+
+# feature_fdom_RA <- left_join(feature_RA, fdom_wdf[c(2:4,14:20)], by = c("Organism", "Timepoint", "Replicate"))
+
+day_time <- feature_RA%>%
+  filter(DayNight == "Day")%>%
+  gather(feature_number, RA, 6:ncol(.))%>%
+  dplyr::select(-Replicate)%>%
+  group_by(Organism, feature_number, Timepoint)%>%
+  summarize_if(is.numeric, mean)%>%
+  ungroup()%>%
+  spread(Timepoint, RA)%>%
+  add_column(difference = .$TF-.$T0)%>%
+  dplyr::select(-c("TF", "T0"))
+
+
+
+increase_over_time <- day_time%>%
+  filter(difference > 0)%>%
+  spread(Organism, difference)
+
+decrease_over_time <- day_time%>%
+  filter(difference < 0)%>%
+  spread(Organism, difference)
 
 
 # FCM Stats prep---------------------------------------------------------------------
@@ -126,7 +165,7 @@ dorcierr_exudates_day <- dorcierr_remins_cleaned%>%
          !Replicate == 3,
          !Replicate == 4)
 
-# fDOM Stats prep --------------------------------------------------------------
+# fDOM and DOC Stats prep --------------------------------------------------------------
 fdom_log10 <-
   as.data.frame(
     sapply(
@@ -137,6 +176,9 @@ fdom_log10 <-
   add_column(Timepoint = fdom_wdf$Timepoint, .after = 1)%>%
   add_column(Organism = fdom_wdf$Organism, .after = 1)
 
+doc_log10 <- moorea_doc%>%
+  mutate_if(is.numeric, log10)
+
 
 ## FCM stats for One-Way Anovas -----------------------------------------------------------
 #Combine dataframes into one
@@ -145,7 +187,7 @@ fcm_stats_df <- left_join(fcm_t7, fcm_rate_th_t0[c(2:3,7)], by = c("Organism", "
 
 
 # Two-way Anova Stats prep ------------------------------------------------
-dom_stats_wdf <- full_join(fdom_log10, dorcierr_remins_cleaned, by = c("Organism", "Timepoint", "Replicate"))%>%
+dom_stats_wdf <- full_join(left_join(fdom_log10, doc_log10, by = "sample_name"), dorcierr_remins_cleaned, by = c("Organism", "Timepoint", "Replicate"))%>%
   filter(!Organism == "Influent",
          !Organism == "Offshore")
 
@@ -225,7 +267,7 @@ dom_timepoint_post_hoc <- dom_stats_wdf%>%
 set.seed(2005)
 
 
-# Exudates T0 -------------------------------------------------------------
+# Exudates T0 (Dunnetts) -------------------------------------------------------------
 dom_org_dunnetts_exudates <- lapply(dom_organism_exudates_ph[4:ncol(dom_organism_exudates_ph)], function(y, f)
   summary(glht(aov(y ~ f, dom_organism_exudates_ph), 
                linfct = mcp(f = "Dunnett"))),
@@ -242,7 +284,7 @@ pvals_dunn_org_exudates_dom <- as.data.frame(
 pvals_dunn_org_exudates_dom <- cbind("Organism" = c("CCA",
                                                       "Dictyota", 
                                                       "Pocillopora verrucosa",
-                                                      "Porites Lobata",
+                                                      "Porites lobata",
                                                       "Turf"),
                                      pvals_dunn_org_exudates_dom)
 
@@ -261,10 +303,30 @@ dunnett_sig_features_exudates <- as.vector(dom_dunnett_sig_exudates$feature_numb
 dom_dunnett_exudates_networking <- right_join(networking, dom_dunnett_sig_exudates, by = "feature_number")
 
 
+# Different Exudates T0 ------------------------------------------------------
+dom_organism_exudates_pre_tukey <- dom_organism_exudates_ph%>%
+  dplyr::select(c(1:3, dunnett_sig_features_exudates))
+
+tukey_exudates <- sapply(dom_organism_exudates_pre_tukey[4:ncol(dom_organism_exudates_pre_tukey)], function(x)
+  TukeyHSD(aov(x ~ dom_organism_exudates_pre_tukey$Organism, data = dom_organism_exudates_pre_tukey), p.adjust.methods = "BH"))
+
+tukey_exudates_p <- as.data.frame(tukey_exudates)%>%
+  rownames_to_column(var = "variable")%>%
+  gather(feature_info, value, 2:ncol(.))%>%
+  filter(feature_info %like% '%p.adj%')%>%
+  filter(value, value < 0.05)%>%
+  rename(feature_number = feature_info)
+
+tukey_exudates_p$feature_number <- tukey_exudates_p$feature_number%>%
+  gsub(".dom_organism_exudates_pre_tukey.Organism.p.adj", "",.)%>%
+  gsub("X","",.)
+
+tukey_exudates_networking <- left_join(tukey_exudates_p, networking, by = "feature_number")
+
 # Finding unique exudates to organisms ------------------------------------
 dom_dunnett_exudates_networking[is.na(dom_dunnett_exudates_networking)] <- 0
 
-exudates <- dom_dunnett_exudates_networking[15:19]
+exudates <- dom_dunnett_exudates_networking[17:21]
 
 exudates[exudates > 0] <- 1
 
@@ -279,7 +341,7 @@ poc_exudates_only <- exudates%>%
   filter(max == "Pocillopora verrucosa")
 
 por_exudates_only <- exudates%>%
-  filter(max == "Porites Lobata")
+  filter(max == "Porites lobata")
 
 cca_exudates_only <- exudates%>%
   filter(max == "CCA")
@@ -292,45 +354,47 @@ trf_exudates_only <- exudates%>%
 
 
 # Pocillopora exudates
-poc_exudates <- right_join(dom_dunnett_exudates_networking, poc_exudates_only[6], by = "feature_number")
-
-poc_elements <- poc_exudates[8:14]%>%
-  # summarize_if(is.numeric, mean)%>%
-  # gather(element, average, 1:ncol(.))%>%
+poc_exudates <- right_join(dom_dunnett_exudates_networking, poc_exudates_only[6], by = "feature_number")%>%
   add_column(Organism = "Pocillopora Verrucosa", .before = 1)
 
-# CCA exudates
-cca_exudates <- right_join(dom_dunnett_exudates_networking, cca_exudates_only[6], by = "feature_number")
-
-cca_elements <- cca_exudates[8:14]%>%
+poc_elements <- poc_exudates[8:14]
   # summarize_if(is.numeric, mean)%>%
-  # gather(element, average, 1:ncol(.))%>%
+  # gather(element, average, 1:ncol(.))
+
+# CCA exudates
+cca_exudates <- right_join(dom_dunnett_exudates_networking, cca_exudates_only[6], by = "feature_number")%>%
   add_column(Organism = "CCA", .before = 1)
 
-# Porites exudates
-por_exudates <- right_join(dom_dunnett_exudates_networking, por_exudates_only[6], by = "feature_number")
-
-por_elements <- por_exudates[8:14]%>%
+cca_elements <- cca_exudates[8:14]
   # summarize_if(is.numeric, mean)%>%
-  # gather(element, average, 1:ncol(.))%>%
+  # gather(element, average, 1:ncol(.))
+
+# Porites exudates
+por_exudates <- right_join(dom_dunnett_exudates_networking, por_exudates_only[6], by = "feature_number")%>%
   add_column(Organism = "Porites lobata", .before = 1)
 
-# Dictyota Exudates
-dic_exudates <- right_join(dom_dunnett_exudates_networking, dic_exudates_only[6], by = "feature_number")
-
-dic_elements <- dic_exudates[8:14]%>%
+por_elements <- por_exudates[8:14]
   # summarize_if(is.numeric, mean)%>%
-  # gather(element, average, 1:ncol(.))%>%
+  # gather(element, average, 1:ncol(.))
+
+# Dictyota Exudates
+dic_exudates <- right_join(dom_dunnett_exudates_networking, dic_exudates_only[6], by = "feature_number")%>%
   add_column(Organism = "Dictyota", .before = 1)
 
-# Turf Exudates
-trf_exudates <- right_join(dom_dunnett_exudates_networking, trf_exudates_only[6], by = "feature_number")
-
-trf_elements <- trf_exudates[8:14]%>%
+dic_elements <- dic_exudates[8:14]
   # summarize_if(is.numeric, mean)%>%
-  # gather(element, average, 1:ncol(.))%>%
+  # gather(element, average, 1:ncol(.))
+
+# Turf Exudates
+trf_exudates <- right_join(dom_dunnett_exudates_networking, trf_exudates_only[6], by = "feature_number")%>%
   add_column(Organism = "Turf", .before = 1)
 
+trf_elements <- trf_exudates[8:14]
+  # summarize_if(is.numeric, mean)%>%
+  # gather(element, average, 1:ncol(.))%>%
+  
+
+exudates_all <- bind_rows(cca_exudates, por_exudates, poc_exudates, dic_exudates, trf_exudates)
 
 ## Combining tables back toghether
 mean_elemntal_composition <- bind_rows(poc_elements, por_elements, cca_elements, dic_elements, trf_elements)
@@ -366,6 +430,14 @@ ggplot(graphing_elements, aes(x = Organism, y = number, fill = element))+
   
 
 # Remineralized TF DOM ----------------------------------------------------
+dom_org_dunnetts_remins <- lapply(dom_organism_remineralized_ph[4:ncol(dom_organism_remineralized_ph)], function(y, f)
+  summary(glht(aov(y ~ f, dom_organism_remineralized_ph), 
+               linfct = mcp(f = "Dunnett"))),
+  f = 
+    as.factor(
+      relevel(
+        factor(dom_organism_remineralized_ph$Organism), "Water control")))
+
 pvals_dunn_org_remins_dom <- as.data.frame(
   sapply(
     dom_org_dunnetts_remins,
@@ -374,7 +446,7 @@ pvals_dunn_org_remins_dom <- as.data.frame(
 pvals_dunn_org_remins_dom <- cbind("Organism" = c("CCA",
                                                     "Dictyota", 
                                                     "Pocillopora verrucosa",
-                                                    "Porites Lobata",
+                                                    "Porites lobata",
                                                     "Turf"),
                                      pvals_dunn_org_remins_dom)
 
@@ -393,6 +465,12 @@ dunnett_sig_features_remin <- as.vector(dom_dunnett_sig_remins$feature_number)
 
 dom_dunnett_remins_networking <- right_join(networking, dom_dunnett_sig_remins, by = "feature_number")
 
+
+# writing significantly exuded compounds ----------------------------------
+sig_compounds_wdf <- dom_organism_post_hoc%>%
+  dplyr::select(c(1:3, dunnett_sig_features_exudates, dunnett_sig_features_remin))
+
+write_csv(sig_compounds_wdf, "DORCIERR_Sig_compounds_dunnetts.dat")
 
 
 # DOM Timepoint Post-hoc --------------------------------------------------
@@ -467,8 +545,178 @@ time_aovs <- bind_rows(aov_time_cca, aov_time_dic, aov_time_poc, aov_time_por, a
 time_aovs$FDR <- p.adjust(time_aovs$p_value, method = "BH")
 
 time_aov_sigs <- time_aovs%>%
-  filter(FDR < 0.05)
+  filter(FDR < 0.05)%>%
+  dplyr::select(-p_value)%>%
+  spread(Organism, FDR)
 
+time_aov_sig_features <- as.vector(time_aov_sigs$feature_number)
+
+# labile compounds --------------------------------------------------------
+## These are defined as features which are present in T0 for any organism and then decrease from T0 -> TF
+
+time_differ_exudate_filtered <- dom_dunnett_exudates_networking%>%
+  filter(feature_number %like any% time_aov_sig_features)
+
+labile_exudate_filtered_RA <- inner_join(time_aov_sigs, 
+                                         inner_join(time_differ_exudate_filtered, decrease_over_time, 
+                                             by = "feature_number", suffix = c(".p_exudation", ".RA")),
+                                             by = "feature_number", suffix = c(".p_timepoint", ""))
+
+
+## specific groupings
+#Single organisms
+poc_labile <- labile_exudate_filtered_RA%>%
+  filter(`Pocillopora verrucosa.p_exudation` != 0,
+         `Porites lobata.p_exudation` == 0,
+         `Dictyota.p_exudation` == 0,
+         `CCA.p_exudation` == 0,
+         `Turf.p_exudation` == 0,
+         Pocillopora != "NA")%>%
+  add_column(tag = "poc_labile")
+
+por_labile <- labile_exudate_filtered_RA%>%
+  filter(`Pocillopora verrucosa.p_exudation` == 0,
+         `Porites lobata.p_exudation` != 0,
+         `Dictyota.p_exudation` == 0,
+         `CCA.p_exudation` == 0,
+         `Turf.p_exudation` == 0,
+         Porites != "NA")%>%
+  add_column(tag = "por_labile")
+
+
+cca_labile <- labile_exudate_filtered_RA%>%
+  filter(`Pocillopora verrucosa.p_exudation` == 0,
+         `Porites lobata.p_exudation` == 0,
+         `Dictyota.p_exudation` == 0,
+         `CCA.p_exudation` != 0,
+         `Turf.p_exudation` == 0,
+         CCA != "NA")%>%
+  add_column(tag = "cca_labile")
+
+
+dic_labile <- labile_exudate_filtered_RA%>%
+  filter(`Pocillopora verrucosa.p_exudation` == 0,
+         `Porites lobata.p_exudation` == 0,
+         `Dictyota.p_exudation` != 0,
+         `CCA.p_exudation` == 0,
+         `Turf.p_exudation` == 0,
+         Dictyota != "NA")%>%
+  add_column(tag = "dic_labile")
+
+
+trf_labile <- labile_exudate_filtered_RA%>%
+  filter(`Pocillopora verrucosa.p_exudation` == 0,
+         `Porites lobata.p_exudation` == 0,
+         `Dictyota.p_exudation` == 0,
+         `CCA.p_exudation` == 0,
+         `Turf.p_exudation` != 0,
+         Turf != "NA")%>%
+  add_column(tag = "trf_labile")
+
+
+
+#Classes of organisms
+coral_labile <- labile_exudate_filtered_RA%>%
+  filter(`Pocillopora verrucosa.p_exudation` != 0,
+         `Porites lobata.p_exudation` != 0,
+         `Dictyota.p_exudation` == 0,
+         `CCA.p_exudation` == 0,
+         `Turf.p_exudation` == 0,
+         Pocillopora != "NA",
+         Porites != "NA")
+
+algae_labile <- labile_exudate_filtered_RA%>%
+  filter(`Pocillopora verrucosa.p_exudation` == 0,
+         `Porites lobata.p_exudation` == 0,
+         `Dictyota.p_exudation` != 0,
+         `CCA.p_exudation` != 0,
+         `Turf.p_exudation` != 0,
+         CCA != "NA",
+         Dictyota != "NA",
+         Turf != "NA")
+
+fleshy_labile <- labile_exudate_filtered_RA%>%
+  filter(`Pocillopora verrucosa.p_exudation` == 0,
+         `Porites lobata.p_exudation` == 0,
+         `Dictyota.p_exudation` != 0,
+         `CCA.p_exudation` == 0,
+         `Turf.p_exudation` != 0,
+         Dictyota != "NA",
+         Turf != "NA")
+
+primary_labile <-labile_exudate_filtered_RA%>%
+  filter(`Pocillopora verrucosa.p_exudation` != 0,
+         `Porites lobata.p_exudation` != 0,
+         `Dictyota.p_exudation` != 0,
+         `CCA.p_exudation` != 0,
+         `Turf.p_exudation` != 0,
+         CCA != "NA",
+         Dictyota != "NA",
+         Turf != "NA",
+         Pocillopora != "NA",
+         Porites != "NA")
+
+##Calculating bond energies of individual labile compounds
+bond_energies <- bind_rows(poc_labile, por_labile, dic_labile, cca_labile, trf_labile)%>%
+  dplyr::select(c(33, 21))
+
+bond_tukey <- TukeyHSD(aov(
+  bond_energies$cox_gibbs_energy ~ bond_energies$tag, data = bond_energies), 
+  p.adjust.methods = "BH")
+
+bond_pvalues <- as.data.frame(bond_tukey$`bond_energies$tag`)%>%
+  rownames_to_column(var = "organism")
+
+
+#combined labile compounds  
+combined_labile_compounds <- bind_rows(poc_labile, por_labile, dic_labile, cca_labile, trf_labile)
+
+##Grouping by the labile exudates canopus annotations to understand variation
+grouped_summed_compounds <- combined_labile_compounds%>%
+  dplyr::select(c(network, canopus_annotation, tag))%>%
+  add_column(value = 1)%>%
+  rownames_to_column(var = "unique")%>%
+  spread(network, value)%>%
+  dplyr::select(-unique)
+
+grouped_summed_compounds[is.na(grouped_summed_compounds)] <- 0
+
+summation_labile <- grouped_summed_compounds%>%
+  group_by(tag, canopus_annotation)%>%
+  summarize_if(is.numeric, sum)%>%
+  ungroup()%>%
+  gather(network, value, 3:ncol(.))%>%
+  spread(tag, value)
+
+summation_labile[is.na(summation_labile)] <- 0
+
+summation_labile$sum <- apply(summation_labile[3:ncol(summation_labile)], 1, sum)
+
+canopus_networks_sums <- summation_labile%>%
+  filter(!sum == 0)%>%
+  rename(CCA = cca_labile,
+         Dictyota = dic_labile,
+         Pocillopora = poc_labile,
+         Porites = por_labile,
+         Turf = trf_labile)
+
+canopus_no_networks <- canopus_networks_sums%>%
+  dplyr::select(-network)%>%
+  group_by(canopus_annotation)%>%
+  summarize_if(is.numeric, sum)
+
+write_csv(canopus_no_networks, "./staring_at_data/canopus_no_networks.dat")
+
+
+# Recalcitrant compounds -------------
+## Binning compounds different in remins by produced compounds 
+time_differ_produced_filtered <- dom_dunnett_remins_networking%>%
+  filter(feature_number %like any% time_aov_sig_features)
+
+recalcitrant_filtered_RA <- inner_join(time_aov_sigs, 
+                                         inner_join(time_differ_produced_filtered, increase_over_time, 
+                                                    by = "feature_number", suffix = c(".p_produced", ".RA")),
+                                         by = "feature_number", suffix = c(".p_timepoint", ""))
 
 
 # One Way Anova FCM -------------------------------------------------------
@@ -509,8 +757,7 @@ p_values_tukey_fcm_TF <- as.data.frame(tukey_model_fcm_TF$`fcm_t7$Organism`)%>%
   filter(value < 0.05)
 
 
-
-## Visualizations to help explain data
+## Visualizations to help explain data --------------
 ggplot(fcm_rate_t7_t0, aes(x = Organism, y = log10_change_per_hour))+
   geom_boxplot(outlier.colour="red", outlier.shape=8,
                outlier.size=4)
@@ -533,6 +780,36 @@ ggplot(fcm_graphing_wdf, aes(x = Timepoint, y = log10_cells, col = Organism))+
   geom_point(stat = "summary", fun.y = "mean")+
   stat_summary(fun.y=mean, geom="line")
 
+ggplot(bond_energies, aes(x = tag, y = bond_energy))+
+  geom_point(stat = "summary", fun.y = "mean")
 
 
+# PCoA --------------------------------------------------------------------
+
+dom <- as.matrix(canopus_no_networks%>%
+                   dplyr::select(-1)) ## No fDOM because it is negative
+
+veg_bray_dom <- vegdist(dom, "bray") #Bray-curtis distances
+
+pc_scores <- pcoa(veg_bray_dom) #Calculating scores
+
+#This plots Eigenvalues
+#They will allow you to choose the best axes to show how your data varies
+ylimit = c(0, 1.1*max(pc_scores$values$Relative_eig))
+
+Eigan <- barplot(pc_scores$values$Relative_eig[1:10], ylim= ylimit)
+# Add values to the bars
+text(x = Eigan, y = pc_scores$values$Relative_eig[1:10], label = pc_scores$values$Relative_eig[1:10], pos = 4, cex = .7, col = "red")
+
+# S3 method for pcoa
+biplot(pc_scores, Y=NULL, plot.axes = c(1,2), dir.axis1=1,
+       dir.axis2=1)
+
+pco_scores <- as.data.frame(pc_scores$vectors)
+pco_scores$organism <- canopus_no_networks$canopus_annotation     # This will add reference labels to the PCoA scores
+
+ggplot(pco_scores, mapping = aes(x = Axis.1, y = Axis.2))
+
+
+write.csv(pco_scores, "PCoA_scores_labile_exudates.dat")
 
