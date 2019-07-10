@@ -177,7 +177,15 @@ fdom_log10 <-
   add_column(Organism = fdom_wdf$Organism, .after = 1)
 
 doc_log10 <- moorea_doc%>%
-  mutate_if(is.numeric, log10)
+  mutate_if(is.numeric, log10)%>%
+  filter(sample_name != "D_OF_1_T0N",
+         sample_name != "D_IN_2_T0N",
+         sample_name != "D_PL_3_TFN",
+         sample_name != "D_TR_1_T0N",
+         sample_name != "D_WA_2_T0D",
+         sample_name != "D_WA_1_T0D",
+         sample_name != "D_CC_1_T0D",
+         sample_name != "D_CC_2_T0D")
 
 
 ## FCM stats for One-Way Anovas -----------------------------------------------------------
@@ -236,7 +244,7 @@ dom_organism_exudates_ph <- dom_organism_post_hoc%>%
   dplyr::select(-sample_name)%>%
   unite(sample, c("Organism", "Timepoint", "Replicate"), sep = "_", remove = TRUE)%>%
   gather(feature_name, asin, 2:ncol(.))%>%
-  spread(sample, asin)%>%
+  spread(sample, asin)
   add_column(sum = apply(.[2:ncol(.)], 1, sum))%>%
   filter(!sum == 0)%>%
   dplyr::select(-sum)%>%
@@ -302,6 +310,102 @@ dunnett_sig_features_exudates <- as.vector(dom_dunnett_sig_exudates$feature_numb
 
 dom_dunnett_exudates_networking <- right_join(networking, dom_dunnett_sig_exudates, by = "feature_number")
 
+
+# Cox gibbs energies of exudates ------------------------------------------
+
+sig_exudates_networking <- left_join(dom_dunnett_sig_exudates, networking, by = "feature_number")
+
+sig_exudates_networking[is.na(sig_exudates_networking)] <- 0
+
+poc_exudates_energy <- sig_exudates_networking%>%
+  filter(`Pocillopora verrucosa` != 0,
+         `Porites lobata` == 0,
+         `Dictyota` == 0,
+         `CCA` == 0,
+         `Turf` == 0)%>%
+  add_column(tag = "Pocillopora")
+
+por_exudates_energy <- sig_exudates_networking%>%
+  filter(`Pocillopora verrucosa` == 0,
+         `Porites lobata` != 0,
+         `Dictyota` == 0,
+         `CCA` == 0,
+         `Turf` == 0)%>%
+  add_column(tag = "Porites")
+
+
+cca_exudates_energy <- sig_exudates_networking%>%
+  filter(`Pocillopora verrucosa` == 0,
+         `Porites lobata` == 0,
+         `Dictyota` == 0,
+         `CCA` != 0,
+         `Turf` == 0)%>%
+  add_column(tag = "CCA")
+
+
+dic_exudates_energy <- sig_exudates_networking%>%
+  filter(`Pocillopora verrucosa` == 0,
+         `Porites lobata` == 0,
+         `Dictyota` != 0,
+         `CCA` == 0,
+         `Turf` == 0)%>%
+  add_column(tag = "Dictyota")
+
+
+trf_exudates_energy <- sig_exudates_networking%>%
+  filter(`Pocillopora verrucosa` == 0,
+         `Porites lobata` == 0,
+         `Dictyota` == 0,
+         `CCA` == 0,
+         `Turf` != 0)%>%
+  add_column(tag = "Turf")
+
+
+
+#Classes of organisms
+coral_exudates_energy <- sig_exudates_networking%>%
+  filter(`Pocillopora verrucosa` != 0,
+         `Porites lobata` != 0,
+         `Dictyota` == 0,
+         `CCA` == 0,
+         `Turf` == 0)%>%
+  add_column(tag = "coral")
+
+algae_exudates_energy <- sig_exudates_networking%>%
+  filter(`Pocillopora verrucosa` == 0,
+         `Porites lobata` == 0,
+         `Dictyota` != 0,
+         `CCA` != 0,
+         `Turf` != 0)%>%
+  add_column(tag = "algae")
+
+fleshy_exudates_energy <- sig_exudates_networking%>%
+  filter(`Pocillopora verrucosa` == 0,
+         `Porites lobata` == 0,
+         `Dictyota` != 0,
+         `CCA` == 0,
+         `Turf` != 0)%>%
+  add_column(tag = "fleshy_algae")
+
+primary_exudates_energy <-sig_exudates_networking%>%
+  filter(`Pocillopora verrucosa` != 0,
+         `Porites lobata` != 0,
+         `Dictyota` != 0,
+         `CCA` != 0,
+         `Turf` != 0)%>%
+  add_column(tag = "primary_producers")
+  
+energies <- bind_rows(poc_exudates_energy, por_exudates_energy, dic_exudates_energy, trf_exudates_energy, cca_exudates_energy,
+                  coral_exudates_energy, algae_exudates_energy, fleshy_exudates_energy, primary_exudates_energy)%>%
+  dplyr::select(c(tag, feature_number, cox_gibbs_energy))
+
+write_csv(energies, "./staring_at_data/exudate_energies.dat")
+
+energy_exudates_tukey <- TukeyHSD(aov(cox_gibbs_energy ~ tag, data = energies), method = "BH")
+
+energy_exudates_tukey_p <- as.data.frame(energy_exudates_tukey$tag)%>%
+  rownames_to_column(var = "variable")%>%
+  filter(`p adj` < 0.05)
 
 # Different Exudates T0 ------------------------------------------------------
 dom_organism_exudates_pre_tukey <- dom_organism_exudates_ph%>%
