@@ -33,7 +33,7 @@ dorc_fcm_fdom <- read_xlsx("DORCIERR_fDOM_FCM.xlsx")%>%
 dorc_metab <- read_csv("DORCIERR_metabolomics_wdf.csv")
 
 #OTU table-esque
-feature_metadata <- read_csv("moorea_feature_table_master_post_filtered.csv")%>%
+feature_metadata <- read_csv("~/Documents/SDSU/Moorea_2017/190312_new_fusion/moorea_feature_table_master_post_filtered.csv")%>%
   dplyr::select(1:100)
 
 #DOC data
@@ -42,11 +42,16 @@ moorea_doc <- read_xlsx("MO17_ExpSummary_DOC.2018.04.04.xlsx")%>%
   rename(sample_name = 1)%>%
   rename(DOC = 2)
 
+#Canopus_annotations
+chemont_anotations <- read_csv("~/Documents/SDSU/Moorea_2017/190312_new_fusion/categories.canopus.strings.nelsonMarch2019.CSV")
+
 #Relative abundance data for both graphing and for finding increasing/decreasing stuff
 feature_RA <- read_csv("DORCIERR_RA_wdf.dat")
 
 #Networking information for analyzing stats
-network_id <- feature_metadata[c(1, 10, 84, 17,23, 26, 33, 38, 29)]
+network_id <- feature_metadata%>%
+  dplyr::select('feature_number', 'network', 'LibraryID', 'Compound_NameAnalog_', 'ZodiacMF', 'ZodiacScore',
+                'canopus_annotation', 'level', 'canopus_probability', 'CLASS_STRING')
 network_id$feature_number <- as.character(network_id$feature_number)
 
 networking_elements <- network_id%>%
@@ -61,7 +66,7 @@ networking_energy <- networking_elements%>%
   add_column(NOSC = (-((4*.$C + .$H - 3*.$N - 2*.$O + 5*.$P - 2*.$S)/.$C)+4))%>%
   add_column(cox_gibbs_energy = 60.3-28.5*.$NOSC)
 
-networking <-left_join(network_id, networking_energy, by = "feature_number")%>%
+networking_close <-left_join(network_id, networking_energy, by = "feature_number")%>%
   separate(CLASS_STRING, c('Level 1','Level 2','Level 3','Level 4','Level 5',
                            'Level 6','Level 7','Level 8'), sep = ";")%>%
   add_column(binary_ID = .$LibraryID, .after = 3)%>%
@@ -74,7 +79,26 @@ networking <-left_join(network_id, networking_energy, by = "feature_number")%>%
                                  binary_ID == "N/A" ~ canopus_annotation,
                                TRUE ~ as.character(binary_ID)))%>%
   dplyr::select(-c(LibraryID, Compound_NameAnalog_))
-  
+
+## building column for chemical diversity
+cho <- networking_close%>%
+  dplyr::select(c(feature_number, 17:23))%>%
+  mutate(C = case_when(C > 0 ~ "C",
+                       TRUE ~ ""),
+         H = case_when(H > 0 ~ "H",
+                       TRUE ~ ""),
+         O = case_when(O > 0 ~ "O",
+                       TRUE ~ ""),
+         N = case_when(N > 0 ~ "N",
+                       TRUE ~ ""),
+         P = case_when(P > 0 ~ "P",
+                       TRUE ~ ""),
+         S = case_when(S > 0 ~ "S",
+                       TRUE ~ ""))%>%
+  unite(simplified_makeup, c(C,H,O,N,P,S), sep = "")
+
+networking <- left_join(networking_close, cho, by = "feature_number")
+
 
 
 # CLEANING -- Subsetting to FCM or fDOM -----------------------------------------------
@@ -424,10 +448,12 @@ time_aovs$FDR <- p.adjust(time_aovs$p_value, method = "BH")
 
 # STATS P-VALUE -- Timepoint anovas --------------------------------------------------------
 time_aov_sigs <- time_aovs%>%
-  filter(p_value < 0.05)%>%
-  dplyr::select(-FDR)%>%
-  unite(combined, c(Organism, feature_number), sep = "_", remove = TRUE)
-#   dplyr::select(-p_value)%>%
+  filter(FDR < 0.05)%>%
+  # dplyr::select(-FDR)%>%
+  unite(combined, c(Organism, feature_number), sep = "_", remove = TRUE)%>%
+  dplyr::select(-p_value)%>%
+  rename(p_value = FDR)
+
 
 
 time_aov_sig_features <- as.vector(time_aov_sigs$feature_number)
@@ -461,10 +487,12 @@ dom_dunnetts_FDR_exudates$FDR_f <-p.adjust(dom_dunnetts_FDR_exudates$p_value, me
 
 # STATS P-VALUE -- T0 Dunnetts ----------------------------
 dom_dunnett_sig_exudates <- dom_dunnetts_FDR_exudates%>%
-  filter(p_value < 0.05)%>%
-  dplyr::select(-FDR_f)%>%
-  unite(combined, c(Organism, feature_number), sep = "_", remove = TRUE)
-#   dplyr::select(-p_value)%>%
+  filter(FDR_f < 0.05)%>%
+  # dplyr::select(-FDR_f)%>%
+  unite(combined, c(Organism, feature_number), sep = "_", remove = TRUE)%>%
+  dplyr::select(-p_value)%>%
+  rename(p_value = FDR_f)
+
 
 dunnett_sig_features_exudates <- as.vector(dom_dunnett_sig_exudates$feature_number)
 
@@ -497,10 +525,11 @@ dom_dunnetts_FDR_remins$FDR_f <-p.adjust(dom_dunnetts_FDR_remins$p_value, method
 
 # STATS P-VALUE -- TF Dunnetts  -------------------------------------
 dom_dunnett_sig_remins <- dom_dunnetts_FDR_remins%>%
-  filter(p_value < 0.05)%>%
-  dplyr::select(-FDR_f)%>%
-  unite(combined, c(Organism, feature_number), sep = "_", remove = TRUE)
-#   dplyr::select(-p_value)%>%
+  filter(FDR_f < 0.05)%>%
+  # dplyr::select(-FDR_f)%>%
+  unite(combined, c(Organism, feature_number), sep = "_", remove = TRUE)%>%
+  dplyr::select(-p_value)%>%
+  rename(p_value = FDR_f)
 
 
 
@@ -517,13 +546,11 @@ dunnett_exudates <- inner_join(exudate, dom_dunnett_sig_exudates, by = "combined
 labile_exudates <- inner_join(time_sigs_decrease, dunnett_exudates, by = "combined", suffix = c(".time", ".dunnetts"))%>%
   separate(combined, c("Organism", "feature_number"), sep = "_")
 
-unique_labile_exudates <- labile_exudates%>%
+labile_exudate_filtered_RA <- labile_exudates%>%
   dplyr::select(-c(4,5))%>%
   gather(test, p_value, 3:4)%>%
   unite(name, c("Organism", "test"), sep = "_", remove = TRUE)%>%
   spread(name, p_value)
-
-labile_exudate_filtered_RA <- right_join(networking, unique_labile_exudates, by = "feature_number")
 
 labile_exudate_filtered_RA[is.na(labile_exudate_filtered_RA)] <- 0
 
@@ -633,24 +660,27 @@ labile_primary <-labile_exudate_filtered_RA%>%
          `Pocillopora verrucosa_p_value.time`  != 0,
          `Porites lobata_p_value.time`  != 0,
          `CCA_p_value.time` != 0)%>%
-  add_column(tag = "primary_producers_labile")
+  add_column(tag = "primaryproducers_labile")
 
 ##Calculating bond energies of individual labile compounds
-bond_energies <- bind_rows(labile_poc, labile_por, labile_cca, labile_turf, labile_dic)%>%
-  dplyr::select(c(33, 21))
+bond_energies <- bind_rows(labile_poc, labile_por, labile_cca, labile_turf, labile_dic)
+
+bond_networks <- right_join(networking, bond_energies, by = "feature_number")%>%
+  dplyr::select('tag', 'cox_gibbs_energy')
 
 bond_tukey <- TukeyHSD(aov(
-  bond_energies$cox_gibbs_energy ~ bond_energies$tag, data = bond_energies), 
+  bond_networks$cox_gibbs_energy ~ bond_networks$tag, data = bond_networks), 
   p.adjust.methods = "BH")
 
-bond_pvalues <- as.data.frame(bond_tukey$`bond_energies$tag`)%>%
+bond_pvalues <- as.data.frame(bond_tukey$`bond_networks$tag`)%>%
   rownames_to_column(var = "organism")
 
 
 #combined labile compounds  
-combined_labile_compounds <- bind_rows(labile_poc, labile_por, labile_cca, labile_turf, labile_dic, labile_coral, 
+combined_labile <- bind_rows(labile_poc, labile_por, labile_cca, labile_turf, labile_dic, labile_coral, 
                                        labile_algae, labile_fleshy, labile_primary)
 
+combined_labile_compounds <- right_join(networking, combined_labile, by = "feature_number")
 
 ##Grouping by the labile exudates canopus annotations to understand variation
 grouped_summed_compounds <- combined_labile_compounds%>%
@@ -810,7 +840,7 @@ accumulite_primary <-microbial_accumulites%>%
          `Pocillopora verrucosa_p_value.time`  != 0,
          `Porites lobata_p_value.time`  != 0,
          `CCA_p_value.time` != 0)%>%
-  add_column(tag = "primary_producers_accumulite")
+  add_column(tag = "primaryproducers_accumulite")
 
 ##combined accumulite data frame
 combined_accumulite_compounds <- right_join(networking, bind_rows(
@@ -818,9 +848,83 @@ combined_accumulite_compounds <- right_join(networking, bind_rows(
   accumulite_algae, accumulite_fleshy, accumulite_primary), by = "feature_number")
 
 
-# METADATA — Labile + Accumulating compounds ------------------------------
-combined_labile_accumulites_compounds <- bind_rows(combined_accumulite_compounds,combined_labile_compounds)
+# META-STATS — Labile + Accumulating compounds ------------------------------
+combined_labile_accumulites_compounds <- bind_rows(combined_accumulite_compounds,combined_labile_compounds)%>%
+  separate(tag, c("Organism", "Lability"), sep = '_')%>%
+  dplyr::select(feature_number, Organism, Lability, everything())
 
+cca_labile_accumulites <- bind_rows(right_join(networking, labile_cca, by = "feature_number"),
+                                    right_join(networking, accumulite_cca, by = "feature_number"))%>%
+  separate(tag, c("Organism", "Lability"), sep = '_')%>%
+  dplyr::select(feature_number, Organism, Lability, everything())
+
+
+# FIGURES — Labile Table by chemical class --------------------------------
+Organism_labile_table <- combined_labile_compounds%>%
+  dplyr::select(tag, canopus_annotation)%>%
+  mutate(tag = case_when(tag == "poc_labile" ~ "Pocillopora verrucosa",
+                         tag == "por_labile" ~ "Porites lobata",
+                         tag == "trf_labile" ~ "Turf",
+                         tag == "cca_labile" ~ "Crustose Corraline Algae",
+                         tag == "dic_labile" ~ "Dictyota",
+                         tag == "coral_labile" ~ "Coral",
+                         tag == "algae_labile" ~ "Algae",
+                         tag == "fleshy_labile" ~ "Fleshy Algae",
+                         tag == "primaryproducers_labile" ~ "Primary Producer",
+                         TRUE ~ as.character(tag)))%>%
+  unite(combined, c("tag", "canopus_annotation"), sep = "_")%>%
+  group_by(combined)%>%
+  add_column(binary = 1)%>%
+  summarize_if(is.numeric, sum)%>%
+  ungroup()%>%
+  separate(combined, c('tag', 'Chemical Classes'), sep = "_")%>%
+  spread(tag, binary)
+
+Organism_labile_table[is.na(Organism_labile_table)] <- 0
+
+labile_table_canopus_rename <- Organism_labile_table%>%
+  rename('name' = 'Chemical Classes')
+
+level_by_string <- right_join(chemont_anotations[c(1,6)], labile_table_canopus_rename, by = "name")%>%
+  separate(CLASS_STRING, c("level 1", "level 2", "level 3",
+                           "level 4", "level 5", "level 6", "level 7", "level 8"), sep = ";")%>%
+  rename('Chemical Classes' = "name")
+
+level_2 <- level_by_string%>%
+  dplyr::select(-c("Chemical Classes", "level 1", "level 3", "level 4", "level 5", "level 6", "level 7", "level 8"))%>%
+  group_by(`level 2`)%>%
+  summarize_if(is.numeric, sum)%>%
+  ungroup()
+
+organism_labile_level <- right_join(level_by_string[c(1,3)], Organism_labile_table, by = "Chemical Classes")
+
+# GRAPHING — PCoA Labile_accumulites --------------------------------------
+clac_features <- as.vector(combined_labile_accumulites_compounds$feature_number)
+
+clac_sig_features_wdf <- dom_stats_wdf%>%
+  dplyr::select(c(1:4, clac_features))
+
+dom_pcoa_df <- dom_stats_wdf%>%
+  dplyr::select(-c(1:4))
+
+veg_bray <- vegdist(dom_pcoa_df, "bray") #Bray-curtis distances
+
+pc_scores<-pcoa(veg_bray) #Calculating scores
+
+#This plots Eigenvalues
+#They will allow you to choose the best axes to show how your data varies
+ylimit = c(0, 1.1*max(pc_scores$values$Relative_eig))
+
+Eigan <- barplot(pc_scores$values$Relative_eig[1:10], ylim= ylimit)
+# Add values to the bars
+text(x = Eigan, y = pc_scores$values$Relative_eig[1:10], label = pc_scores$values$Relative_eig[1:10], pos = 4, cex = .7, col = "red")
+
+# S3 method for pcoa
+biplot(pc_scores, Y=NULL, col = clac_sig_features_wdf$Organism, plot.axes = c(1,2), dir.axis1=1,
+       dir.axis2=1)
+
+pco_scores <- as.data.frame(pc_scores$vectors)
+pco_scores$Sample.Code <- clac_sig_features_wdf$sample_name     # This will add reference labels to the PCoA scores
 
 # WRITING -- Dataframe for Cytoscape ------------------------------
 day_organism_mean <- feature_RA%>%
@@ -862,5 +966,12 @@ write_csv(combined_accumulite_compounds, "./staring_at_data/combined_accumulite_
 
 write_csv(combined_labile_accumulites_compounds, "./staring_at_data/combined_accumulating_labile_compounds.csv")
 
+write_csv(cca_labile_accumulites, "./staring_at_data/cca_labile_accumulites.csv")
 
+write_csv(level_2, "./Labile_table_figure/level_2.csv")
+
+write_csv(organism_labile_level, "./Labile_table_figure/Organism_labile_table.csv")
+
+# WRITING — dataframes for graphing ---------------------------------------
+write.csv(pco_scores, "./staring_at_data/PCo_scores.dat")
 

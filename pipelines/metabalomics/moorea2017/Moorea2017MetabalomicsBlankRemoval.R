@@ -57,51 +57,57 @@ ms_sample_codes <- read_csv("Mo'orea 2017 Mass spec sample codes - Sheet1.csv")%
 # canopus gives many different classifications and the percent chance that the feature falls into that category
 # This section pulls the feature whcih has the highest possiblity to be it.
 # We want only canopus annotations which are level 5 AND above 70% probability
-# canopus_annotation_names <- canopus_anotations%>%
-#   gather(canopus_annotation, canopus_probability, 2:1288)
-# 
-# canopus_chemonnt_tidy <- left_join(canopus_annotation_names, chemont_anotations, by = "canopus_annotation")
-# 
-# canopus_filtered_tidy <- canopus_chemonnt_tidy%>%
-#   rename('feature_number' = 'name')%>%
-#   group_by(feature_number)%>%
-#   do(filter(., canopus_probability >= 0.95))%>%
-#   do(filter(., level == max(level)))%>%
-#   do(filter(., canopus_probability == max(canopus_probability)))%>%
-#   do(filter(., nchar(CLASS_STRING) == max(nchar(CLASS_STRING))))%>%
-#   do(filter(., nchar(canopus_annotation) == max(nchar(canopus_annotation))))%>%
-#   ungroup()
+canopus_annotation_names <- canopus_anotations%>%
+  gather(canopus_annotation, canopus_probability, 2:1288)
+
+canopus_chemonnt_tidy <- left_join(canopus_annotation_names, chemont_anotations, by = "canopus_annotation")
+
+canopus_filtered_tidy <- canopus_chemonnt_tidy%>%
+  rename('feature_number' = 'name')%>%
+  group_by(feature_number)%>%
+  do(filter(., canopus_probability >= 0.80))%>%
+  do(filter(., level > 3))%>%
+  do(filter(., level <7))%>%
+  # do(filter(., level == max(level)))%>%
+  do(filter(., canopus_probability == max(canopus_probability)))%>%
+  do(filter(., level == max(level)))%>%
+  do(filter(., nchar(CLASS_STRING) == max(nchar(CLASS_STRING))))%>%
+  do(filter(., nchar(canopus_annotation) == max(nchar(canopus_annotation))))%>%
+  ungroup()
+
+write_csv(canopus_filtered_tidy, "~/Documents/SDSU/Moorea_2017/190312_new_fusion/canopus_filtered_tidy.csv")
 ## Have to filter out the features which are not in the main spreadsheet
-canopus_anotations_only <- canopus_anotations%>%
-  gather(canopus_annotation, prob, 2:ncol(.))%>%
-  spread(name, prob)
+# canopus_anotations_only <- canopus_anotations%>%
+#   gather(canopus_annotation, prob, 2:ncol(.))%>%
+#   spread(name, prob)
+# 
+# ## Have to order the level in Descending Order
+# chemont_ordered <- chemont_anotations%>%
+#   filter(canopus_annotation %like any% canopus_annotations_only)
+#   arrange(-level)
+# 
+# ordered_annotations <- as.vector(chemont_ordered$canopus_annotation)
+# 
+# sorted <- left_join(canopus_anotations_only, chemont_ordered[1], by = "canopus_annotation")%>%
+#   gather(name, probability, 2:ncol(.))%>%
+#   spread(canopus_annotation, probability)
+# 
+# 
+# canopus_max <- sorted%>%
+#   dplyr::select(-1)
+# 
+# canopus_high_percentage <- canopus_anotations%>%
+#   add_column(canopus_annotation = colnames(canopus_max)[max.col(canopus_max, ties.method = "first")], .before=2)%>%
+#   add_column(probability = apply(canopus_max, 1, max), .after = 2)%>%
+#   dplyr::select(1:3)
 
-## Have to order the level in Descending Order
-chemont_ordered <- chemont_anotations%>%
-  filter(canopus_annotation %like any% canopus_annotations_only)
-  arrange(-level)
 
-ordered_annotations <- as.vector(chemont_ordered$canopus_annotation)
-
-sorted <- left_join(canopus_anotations_only, chemont_ordered[1], by = "canopus_annotation")%>%
-  gather(name, probability, 2:ncol(.))%>%
-  spread(canopus_annotation, probability)
-
-
-canopus_max <- sorted%>%
-  dplyr::select(-1)
-
-canopus_high_percentage <- canopus_anotations%>%
-  add_column(canopus_annotation = colnames(canopus_max)[max.col(canopus_max, ties.method = "first")], .before=2)%>%
-  add_column(probability = apply(canopus_max, 1, max), .after = 2)%>%
-  dplyr::select(1:3)
-
-
-canopus_chemont_high_percentage <- left_join(canopus_high_percentage, chemont_anotations, by = "canopus_annotation")%>%
-  rename(feature_number = 1)
+# canopus_chemont_high_percentage <- left_join(canopus_high_percentage, chemont_anotations, by = "canopus_annotation")%>%
+#   rename(feature_number = 1)
 
 # Combines canopus, sirus, and zodiac
-super_computer_annotations <- full_join(canopus_chemont_high_percentage, sirius_zodiac_anotations, by = "feature_number")
+super_computer_annotations <- full_join(canopus_filtered_tidy, sirius_zodiac_anotations, by = "feature_number")%>%
+  filter(ZodiacScore >= 0.96)
 
 ## join library hits, analog hits and super computer predictions
 metadata <- full_join(node_info, 
@@ -339,15 +345,15 @@ dorcierr_exudates_night_RA <- dorcierr_wdf_RA%>%
          !Replicate == 4)
 
 rr3_day_RA <- moorea_wdf_RA%>%
-  filter(Experiment == "dorcierr")%>%
+  filter(Experiment == "RR3")%>%
   separate(Timepoint, c("Timepoint", "DayNight"), sep = -1)%>%
   mutate(DayNight = case_when(DayNight == "D" ~ "Day",
                               TRUE ~ "Night"))%>%
   filter(Timepoint == 'TF',
-         DayNight == "Day")
+  DayNight == "Day")
 
 rr3_night_RA <- moorea_wdf_RA%>%
-  filter(Experiment == "dorcierr")%>%
+  filter(Experiment == "RR3")%>%
   separate(Timepoint, c("Timepoint", "DayNight"), sep = -1)%>%
   mutate(DayNight = case_when(DayNight == "D" ~ "Day",
                               TRUE ~ "Night"))%>%
