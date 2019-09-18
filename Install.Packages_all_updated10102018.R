@@ -26,7 +26,9 @@ install.packages(c("tidyverse",
                    "RColorBrewer",
                    "ggfortify",
                    "ggmap",
-                   "dunn.test"))
+                   "dunn.test",
+                   "CHNOSZ"))
+
 library(devtools)
 install_github('fawda123/ggord')
 install_github("ggbiplot", "vqv")

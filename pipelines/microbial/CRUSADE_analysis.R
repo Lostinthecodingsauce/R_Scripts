@@ -285,11 +285,12 @@ write_csv(mean_sigs_bacterioplaknton, "significant_OTU_means_bact.dat")
 write_csv(microbiome_sig_otu, "significant_OTU_means_micro.dat")
 
 # Making PCoA's-----------------------------------------------------------
-
+bacterioplankton_noh20 <-bacterioplankton_df%>%
+  filter(Organism != "Water Control")
 #making abundance only matrix and saving columns with names/metadata into dinames
-microb_f <- as.matrix(cca_microb %>%
-                        dplyr::select(-c(Organism, sample_code)),
-                      dinames = list(paste("", 1:31, sep = ",")))
+microb_f <- cca_microb%>%
+  dplyr::select(-c(Organism, sample_code))
+  
 
 veg_bray <- vegdist(microb_f, "bray") #Bray-curtis distances
 
@@ -309,6 +310,49 @@ biplot(pc_scores, Y=NULL, col = microb_f_abun$Organism, plot.axes = c(1,2), dir.
 
 pco_scores <- as.data.frame(pc_scores$vectors)
 pco_scores$Sample.Code <- cca_microb$sample_code     # This will add reference labels to the PCoA scores
+pco_scores$Organism <- cca_microb$Organism
+# pco_scores$Water <- bacterioplankton_noh20$Water
+
+ggplot(pco_scores, aes(x = Axis.1, y = Axis.2, color = Organism, shape = Water)) +
+  geom_point(stat = "identity", aes(size = 10)) +
+  scale_color_manual(values = c("darkgoldenrod3", 'deepskyblue', "lightcoral"))+ 
+  scale_shape_manual(values = c(16,1))+
+  theme(panel.background = element_rect(fill = "transparent"), # bg of the panel
+        plot.background = element_rect(fill = "transparent", color = NA), # bg of the plot
+        axis.title.x = element_text(size=14, face="bold"),
+        axis.title.y = element_text(size=14, face="bold"),
+        axis.text.x = element_text(face="bold", size=14),
+        axis.text.y = element_text(face="bold", size=14),
+        panel.grid.major = element_blank(), # get rid of major grid
+        panel.grid.minor = element_blank(), # get rid of minor grid
+        legend.background = element_rect(fill = "transparent"), # get rid of legend bg
+        legend.box.background = element_rect(fill = "transparent"), # get rid of legend panel bg
+        axis.line = element_line(color="black")
+  ) +
+  xlab("PCoA 1 (28.6%)") +
+  ylab("PCoA 2 (17.3%)")
+
+tiff("bacterioplankton.tiff", units="in", width=8, height=5, res=300)
+ggplot(pco_scores, aes(x = Axis.1, y = Axis.2, color = Organism, shape = Water)) +
+  geom_point(stat = "identity", aes(size = 10)) +
+  scale_color_manual(values = c("darkgoldenrod3", 'deepskyblue', "lightcoral"))+ 
+  scale_shape_manual(values = c(16,1))+
+  theme(panel.background = element_rect(fill = "transparent"), # bg of the panel
+        plot.background = element_rect(fill = "transparent", color = NA), # bg of the plot
+        axis.title.x = element_text(size=14, face="bold"),
+        axis.title.y = element_text(size=14, face="bold"),
+        axis.text.x = element_text(face="bold", size=14),
+        axis.text.y = element_text(face="bold", size=14),
+        panel.grid.major = element_blank(), # get rid of major grid
+        panel.grid.minor = element_blank(), # get rid of minor grid
+        legend.background = element_rect(fill = "transparent"), # get rid of legend bg
+        legend.box.background = element_rect(fill = "transparent"), # get rid of legend panel bg
+        axis.line = element_line(color="black")
+  ) +
+  xlab("PCoA 1 (28.6%)") +
+  ylab("PCoA 2 (17.3%)")
+dev.off()
+
 
 write.csv(pco_scores, "PCo_scores.dat")           # This will print the Scores to remake the figure in JMP because JMP is bae
 # Making Pie Charts -------------------------------------------------------
@@ -480,7 +524,6 @@ Order_CCA <- Order_wdf%>%
 
 
 # Messing with Anova’s for ORDER summed data -----------------------------
-
 ##This appears breifly in the manuscript when I cite the one-way anovas for Orders in relation to the pie charts
 orders <- c("Rhodospirillales", "Rhodobacterales", "Rhizobiales", "Alteromonadales",
             "Flavobacteriales", "Sphingobacteriales", 

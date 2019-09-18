@@ -66,7 +66,7 @@ networking_energy <- networking_elements%>%
   add_column(NOSC = (-((4*.$C + .$H - 3*.$N - 2*.$O + 5*.$P - 2*.$S)/.$C)+4))%>%
   add_column(cox_gibbs_energy = 60.3-28.5*.$NOSC)
 
-networking_close <-left_join(network_id, networking_energy, by = "feature_number")%>%
+networking_close <- left_join(network_id, networking_energy, by = "feature_number")%>%
   separate(CLASS_STRING, c('Level 1','Level 2','Level 3','Level 4','Level 5',
                            'Level 6','Level 7','Level 8'), sep = ";")%>%
   add_column(binary_ID = .$LibraryID, .after = 3)%>%
@@ -92,10 +92,8 @@ cho <- networking_close%>%
          N = case_when(N > 0 ~ "N",
                        TRUE ~ ""),
          P = case_when(P > 0 ~ "P",
-                       TRUE ~ ""),
-         S = case_when(S > 0 ~ "S",
                        TRUE ~ ""))%>%
-  unite(simplified_makeup, c(C,H,O,N,P,S), sep = "")
+  unite(simplified_makeup, c(C,H,O,N,P), sep = "")
 
 networking <- left_join(networking_close, cho, by = "feature_number")
 
@@ -848,7 +846,7 @@ combined_accumulite_compounds <- right_join(networking, bind_rows(
   accumulite_algae, accumulite_fleshy, accumulite_primary), by = "feature_number")
 
 
-# META-STATS — Labile + Accumulating compounds ------------------------------
+# META-STATS —- Labile + Accumulating compounds ------------------------------
 combined_labile_accumulites_compounds <- bind_rows(combined_accumulite_compounds,combined_labile_compounds)%>%
   separate(tag, c("Organism", "Lability"), sep = '_')%>%
   dplyr::select(feature_number, Organism, Lability, everything())
@@ -859,7 +857,81 @@ cca_labile_accumulites <- bind_rows(right_join(networking, labile_cca, by = "fea
   dplyr::select(feature_number, Organism, Lability, everything())
 
 
-# FIGURES — Labile Table by chemical class --------------------------------
+# META-STATS — Microbial remineralized compounds --------------------------
+comparing_features_remins <- dom_dunnett_sig_remins%>%
+  separate(combined, c("Organism", "feature_number"), sep = "_")%>%
+  spread(Organism, p_value)
+
+comparing_features_remins[is.na(comparing_features_remins)] <- 0
+
+## unique features by oragnism
+reminned_poc <- comparing_features_remins%>%
+  filter(`Pocillopora verrucosa` != 0,
+         `Porites lobata` == 0,
+         `Dictyota` == 0,
+         `CCA` == 0,
+         `Turf` == 0)%>%
+  add_column(tag = "Pocillopora_reminned")
+
+reminned_por <- comparing_features_remins%>%
+  filter(`Pocillopora verrucosa` == 0,
+         `Porites lobata` != 0,
+         `Dictyota` == 0,
+         `CCA` == 0,
+         `Turf` == 0)%>%
+  add_column(tag = "Porites_reminned")
+
+reminned_coral <- comparing_features_remins%>%
+  filter(`Pocillopora verrucosa` != 0,
+         `Porites lobata` != 0,
+         `Dictyota` == 0,
+         `CCA` == 0,
+         `Turf` == 0)%>%
+  add_column(tag = "coral_reminned")
+
+reminned_dic <- comparing_features_remins%>%
+  filter(`Pocillopora verrucosa` == 0,
+         `Porites lobata` == 0,
+         `Dictyota` != 0,
+         `CCA` == 0,
+         `Turf` == 0)%>%
+  add_column(tag = "Dictyota_reminned")
+
+reminned_trf <- comparing_features_remins%>%
+  filter(`Pocillopora verrucosa` == 0,
+         `Porites lobata` == 0,
+         `Dictyota` == 0,
+         `CCA` == 0,
+         `Turf` != 0)%>%
+  add_column(tag = "Turf_reminned")
+
+reminned_cca <- comparing_features_remins%>%
+  filter(`Pocillopora verrucosa` == 0,
+         `Porites lobata` == 0,
+         `Dictyota` == 0,
+         `CCA` != 0,
+         `Turf` == 0)%>%
+  add_column(tag = "CCA_reminned")
+
+reminned_fleshy <- comparing_features_remins%>%
+  filter(`Pocillopora verrucosa` == 0,
+         `Porites lobata` == 0,
+         `Dictyota` != 0,
+         `CCA` == 0,
+         `Turf` != 0)%>%
+  add_column(tag = "fleshy_reminned")
+
+
+reminned_algae <- comparing_features_remins%>%
+  filter(`Pocillopora verrucosa` == 0,
+         `Porites lobata` == 0,
+         `Dictyota` != 0,
+         `CCA` != 0,
+         `Turf` != 0)%>%
+  add_column(tag = "algae_reminned")
+
+
+# FIGURES —- Labile Table by chemical class --------------------------------
 Organism_labile_table <- combined_labile_compounds%>%
   dplyr::select(tag, canopus_annotation)%>%
   mutate(tag = case_when(tag == "poc_labile" ~ "Pocillopora verrucosa",
@@ -898,7 +970,7 @@ level_2 <- level_by_string%>%
 
 organism_labile_level <- right_join(level_by_string[c(1,3)], Organism_labile_table, by = "Chemical Classes")
 
-# GRAPHING — PCoA Labile_accumulites --------------------------------------
+# GRAPHING —- PCoA Labile_accumulites --------------------------------------
 clac_features <- as.vector(combined_labile_accumulites_compounds$feature_number)
 
 clac_sig_features_wdf <- dom_stats_wdf%>%
@@ -925,6 +997,54 @@ biplot(pc_scores, Y=NULL, col = clac_sig_features_wdf$Organism, plot.axes = c(1,
 
 pco_scores <- as.data.frame(pc_scores$vectors)
 pco_scores$Sample.Code <- clac_sig_features_wdf$sample_name     # This will add reference labels to the PCoA scores
+
+
+# GRAPHING — network141_grant ---------------------------------------------
+# Not visualized in 141 == "11633",
+net141 <- feature_RA%>%
+  dplyr::select(c(1:5, "11430", "12392",  "11716", "13535", "13491",  "16123", "15438",  "15198"))%>%
+  filter(DayNight == "Day")%>%
+  gather(feature_number, RA, 6:ncol(.))
+
+net141_networking <- left_join(net141, networking, by = "feature_number")%>%
+  rename("Feature Identification" = "combined_ID")
+
+net141_networking$`Feature Identification` <- factor(net141_networking$`Feature Identification`, 
+                                                     levels = c("3-Iodo-L-tyrosine", "L-3,5-Diiodotyrosine",
+                                                                "N-Acetyl-L-phenylalanyl-3,5-diiodo-L-tyrosine",
+                                                                "p-Fluoro-L-phenylalanine", "2-Naphthyl-D-alanine"))
+
+ggplot(net141_networking, aes(x = reorder(Organism, - RA), y= (RA*100), fill = `Feature Identification`)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values= c("#CB9E23", "#F8DF4F", "#1DACE8", "#7496D2", "#1C366B")) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1),
+        panel.background = element_rect(fill = "transparent"), # bg of the panel
+        plot.background = element_rect(fill = "transparent", color = NA), # bg of the plot
+        panel.grid.major = element_blank(), # get rid of major grid
+        panel.grid.minor = element_blank(), # get rid of minor grid
+        legend.background = element_rect(fill = "transparent"), # get rid of legend bg
+        legend.box.background = element_rect(fill = "transparent") # get rid of legend panel bg
+        ) +
+  facet_grid(~ Timepoint) +
+  xlab("Organism") + 
+  ylab("Relative Abundance (percent)")
+
+tiff("test.tiff", units="in", width=10, height=5, res=300)
+ggplot(net141_networking, aes(x = reorder(Organism, - RA), y= (RA*100), fill = `Feature Identification`)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values= c("#CB9E23", "#F8DF4F", "#1DACE8", "#7496D2", "#1C366B")) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1),
+        panel.background = element_rect(fill = "transparent"), # bg of the panel
+        plot.background = element_rect(fill = "transparent", color = NA), # bg of the plot
+        panel.grid.major = element_blank(), # get rid of major grid
+        panel.grid.minor = element_blank(), # get rid of minor grid
+        legend.background = element_rect(fill = "transparent"), # get rid of legend bg
+        legend.box.background = element_rect(fill = "transparent") # get rid of legend panel bg
+  ) +
+  facet_grid(~ Timepoint) +
+  xlab("Organism") + 
+  ylab("Relative Abundance (percent)")
+dev.off()
 
 # WRITING -- Dataframe for Cytoscape ------------------------------
 day_organism_mean <- feature_RA%>%
@@ -953,13 +1073,13 @@ cyto_file<- left_join(organism_mean_networking, meta_stats_cyto, by = "feature_n
 
 write_csv(cyto_file, "./Cytoscape/Day_Dorc_cytoscape.csv")
 
-# WRITING — Two-Way ANOVA Significance table  -----------------------------
+# WRITING —- Two-Way ANOVA Significance table  -----------------------------
 write_csv(two_way_signignificant, "~/Documents/SDSU/DORCIERR/Datasets/stats/Dorcierr_two_way_significant.csv")
 
 
 
 
-# WRITING — Metastats combined tables -------------------------------------
+# WRITING —- Metastats combined tables -------------------------------------
 write_csv(combined_labile_compounds, "./staring_at_data/combined_labile_compounds.csv")
 
 write_csv(combined_accumulite_compounds, "./staring_at_data/combined_accumulite_compounds.csv")
@@ -972,6 +1092,6 @@ write_csv(level_2, "./Labile_table_figure/level_2.csv")
 
 write_csv(organism_labile_level, "./Labile_table_figure/Organism_labile_table.csv")
 
-# WRITING — dataframes for graphing ---------------------------------------
+# WRITING —- dataframes for graphing ---------------------------------------
 write.csv(pco_scores, "./staring_at_data/PCo_scores.dat")
 

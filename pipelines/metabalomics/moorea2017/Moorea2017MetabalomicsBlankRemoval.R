@@ -183,6 +183,18 @@ feature_table_RA_temp <- feature_table_no_back_trans%>%
   spread(feature_number, peak_area)%>%
   add_column(TIC = apply(.[2:13539], 1, sum))
 
+feature_table_log10_temp <- feature_table_no_back_trans%>%
+  gather(sample_name, peak_area, 2:260)%>%
+  spread(feature_number, peak_area)
+  
+feature_log10 <- as.data.frame(
+  sapply(
+    feature_table_log10_temp[2:13539],
+    function(x) log10(x)))%>%
+  add_column(sample_name = feature_table_RA_temp$sample_name, .before = 1)%>%
+  gather(feature_number, RA, 2:13539)%>%
+  spread(sample_name, RA)
+  
 # IonCharge/TIC = RA values for every feature peak area /sum(sample peak areas)
 feature_relative_abundance <- 
   as.data.frame(
@@ -204,7 +216,7 @@ feature_asin_sqrt <-
 # Build feature table working data frame ----------------------------------
 # All three joined together (Peak area, RA, asin(sqrt))
 # Node and network info = [1:25], CANOPUS = [25:27], SIRIUS/ZODIAC = [28:40], Library Hits = [41:67], analog hits = []
-# Blanks.RA = [112:119, 370], Area under the curve = [120:369], 
+# Blanks.RA = [112:119, 370], Area under the curve = [120:375], 
 # RA (blanks included) = [371:630], asin(sqrt) (blanks included) = [631:888]
 feature_table_combined <- left_join(
   left_join(
@@ -218,8 +230,8 @@ feature_table_wdf <- feature_table_combined%>%
 write_csv(feature_table_wdf, "moorea_feature_table_master_post_filtered.csv")
 # Making Mo’orea working data frame for stats -----------------------------
 moorea_transposed <- feature_table_wdf%>%
-  dplyr::select(feature_number, `Blank_Lot_6350565_01.asin(sqrt)`:ncol(.))%>%
-  gather(sample_ID, angular, 2:260)%>%
+  dplyr::select(feature_number, 120:375)%>%
+  gather(sample_ID, angular, 2:ncol(.))%>%
   spread(feature_number, angular)
 
 moorea_transposed$sample_ID <- moorea_transposed$sample_ID%>%
@@ -417,8 +429,35 @@ spiffy_no_bay_RA <- moorea_wdf_RA%>%
                                TRUE ~ "Forereef"))%>%
   filter(!reef_area == "bay")
 
+spiffy_RA <- moorea_wdf_RA%>%
+  filter(Experiment == "SPIFFy")%>%
+  dplyr::select(-"Timepoint")%>%
+  add_column(reef_area = .$Organism, .before = 3)%>%
+  rename(`Site` =`Organism`)%>%
+  mutate(reef_area = case_when(reef_area == 1 ~ "bay",
+                               reef_area == 2 ~ "bay",
+                               reef_area == 3 ~ "bay",
+                               reef_area == 4 ~ "bay",
+                               reef_area == 5 ~ "bay",
+                               reef_area == 6 ~ "backreef",
+                               reef_area == 7 ~ "backreef",
+                               reef_area == 8 ~ "backreef",
+                               reef_area == 9 ~ "backreef",
+                               reef_area == 10 ~ "backreef",
+                               reef_area == 11 ~ "backreef",
+                               reef_area == 12 ~ "backreef",
+                               TRUE ~ "Forereef"))
 
+## Cytoscape 
+cyto_spiffy <- spiffy_RA%>%
+  dplyr::select(-c("Experiment", "Site", "Replicate"))%>%
+  group_by(reef_area)%>%
+  summarize_if(is.numeric, mean)%>%
+  ungroup()%>%
+  gather(feature_number, RA, 2:ncol(.))%>%
+  spread(reef_area, RA)
 
+write_csv(cyto_spiffy, "cyto_spiffy_RA.csv")
 # Spiffy Oneway Anova -----------------------------------------------------
 ## One way anova looking at only backreef and fore reef
 aov_spiffy <- as.data.frame(sapply(spiffy_no_bay[5:ncol(spiffy_no_bay)], function(x) summary(aov(x ~ spiffy_no_bay[["reef_area"]]))[[1]][1,'Pr(>F)']))
