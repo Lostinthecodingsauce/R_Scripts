@@ -1046,6 +1046,61 @@ ggplot(net141_networking, aes(x = reorder(Organism, - RA), y= (RA*100), fill = `
   ylab("Relative Abundance (percent)")
 dev.off()
 
+# GRAPHING -- relative abundances of labile exudates ---------------------
+labile_compound <- as.vector(combined_labile_compounds$feature_number)
+
+labile_RA <- feature_RA%>%
+  dplyr::select(c(1:5, labile_compound))%>%
+  gather(feature_number, RA, 6:ncol(.))%>%
+  filter(DayNight == "Day")
+
+
+labile_RA_meta <- left_join(labile_RA, combined_labile_compounds%>%
+                              dplyr::select(1:28, tag), by = "feature_number")%>%
+  filter(!tag == "algae_labile",
+         !tag == "fleshy_labile",
+         !tag == "primaryproducers_labile")%>%
+  add_column(color = .$simplified_makeup)%>%
+  mutate(color = case_when(color == "CHO" ~ "darkblue",
+                           color == "CHON" ~ "#3B9AB2",
+                           color == "CHN" ~ "#63ADBE",
+                           color == "CHNP" ~ "#9EBE91",
+                           color == "CHONP" ~ "#D1C74C",
+                           color == "CHOP" ~ "#E4B80E",
+                           color == "" ~ "#F21A00",
+                           color == "CH" ~ "#E67D00",
+                           TRUE ~ as.character(color)))
+
+labile_RA_meta$simplified_makeup <- factor(labile_RA_meta$simplified_makeup, 
+                                           levels = c("", "CH", "CHOP", "CHONP", "CHNP", "CHON", "CHN", "CHO"))
+
+lcolors <- labile_RA_meta$color
+
+names(lcolors) <- labile_RA_meta$simplified_makeup
+
+pdf("all_plots_test.pdf")
+labile_RA_meta%>%
+  split(list(.$tag))%>%
+  map(~ggplot(., aes(x = Organism, y= (RA*100), fill = `simplified_makeup`)) +
+        geom_bar(stat = "summary", fun.y = "sum") +
+        scale_fill_manual(values= lcolors)+
+        ggtitle(unique(.$tag)) +
+        theme(
+          axis.text.x = element_text(angle = 60, hjust = 1),
+          panel.background = element_rect(fill = "transparent"), # bg of the panel
+          plot.background = element_rect(fill = "transparent", color = NA), # bg of the plot
+          panel.grid.major = element_blank(), # get rid of major grid
+          panel.grid.minor = element_blank(), # get rid of minor grid
+          legend.background = element_rect(fill = "transparent"), # get rid of legend bg
+          legend.box.background = element_rect(fill = "transparent") # get rid of legend panel bg
+        ) +
+        facet_wrap(~Timepoint) +
+        xlab("Canopus Level 3") + 
+        ylab("Relative Abundance (percent)"))
+dev.off()
+
+
+
 # WRITING -- Dataframe for Cytoscape ------------------------------
 day_organism_mean <- feature_RA%>%
   filter(DayNight == "Day")%>%
