@@ -1060,7 +1060,8 @@ labile_RA_meta <- left_join(labile_RA, combined_labile_compounds%>%
   filter(!tag == "algae_labile",
          !tag == "fleshy_labile",
          !tag == "primaryproducers_labile")%>%
-  add_column(color = .$simplified_makeup)%>%
+  rename(`chemical composition` = simplified_makeup)%>%
+  add_column(color = .$`chemical composition`)%>%
   mutate(color = case_when(color == "CHO" ~ "darkblue",
                            color == "CHON" ~ "#3B9AB2",
                            color == "CHN" ~ "#63ADBE",
@@ -1069,19 +1070,21 @@ labile_RA_meta <- left_join(labile_RA, combined_labile_compounds%>%
                            color == "CHOP" ~ "#E4B80E",
                            color == "" ~ "#F21A00",
                            color == "CH" ~ "#E67D00",
-                           TRUE ~ as.character(color)))
+                           TRUE ~ as.character(color)),
+         Timepoint = case_when(Timepoint == "T0" ~ "Exudate",
+                               Timepoint == "TF" ~ "Microbial accumulite"))
 
-labile_RA_meta$simplified_makeup <- factor(labile_RA_meta$simplified_makeup, 
+labile_RA_meta$`chemical composition` <- factor(labile_RA_meta$`chemical composition`, 
                                            levels = c("", "CH", "CHOP", "CHONP", "CHNP", "CHON", "CHN", "CHO"))
 
 lcolors <- labile_RA_meta$color
 
-names(lcolors) <- labile_RA_meta$simplified_makeup
+names(lcolors) <- labile_RA_meta$`chemical composition`
 
 pdf("all_plots_test.pdf")
 labile_RA_meta%>%
   split(list(.$tag))%>%
-  map(~ggplot(., aes(x = Organism, y= (RA*100), fill = `simplified_makeup`)) +
+  map(~ggplot(., aes(x = Organism, y= (RA*100), fill = `chemical composition`)) +
         geom_bar(stat = "summary", fun.y = "sum") +
         scale_fill_manual(values= lcolors)+
         ggtitle(unique(.$tag)) +
@@ -1099,6 +1102,79 @@ labile_RA_meta%>%
         ylab("Relative Abundance (percent)"))
 dev.off()
 
+
+# GRAPHING -- Labile accummulite ------------------------------------------
+labile_accumulite <- as.vector(combined_labile_accumulites_compounds$feature_number)
+
+labile_accumulite_RA <- feature_RA%>%
+  dplyr::select(c(1:5, labile_accumulite))%>%
+  gather(feature_number, RA, 6:ncol(.))%>%
+  filter(DayNight == "Day",
+         Timepoint == "T0")
+
+
+labile_accumulite_RA_meta_full <- left_join(labile_accumulite_RA, combined_labile_accumulites_compounds%>%
+                                         filter(!Organism == "algae",
+                                           !Organism == "fleshy",
+                                           !Organism == "primaryproducers")%>%
+                                         unite(tag, c(Organism, Lability), sep = "_")%>%
+                                         dplyr::select(1:29), 
+                                       by = "feature_number")%>%
+  rename(`chemical composition` = simplified_makeup)%>%
+  add_column(color = .$`chemical composition`)%>%
+  mutate(color = case_when(color == "CHO" ~ "darkblue",
+                           color == "CHON" ~ "#3B9AB2",
+                           color == "CHN" ~ "darkslatergray2", #Change color to something else
+                           color == "CHNP" ~ "#9EBE91",
+                           color == "CHONP" ~ "#D1C74C",
+                           color == "CHOP" ~ "#E4B80E",
+                           color == "" ~ "#F21A00",
+                           color == "CH" ~ "#E67D00", 
+                           TRUE ~ as.character(color)))%>%
+  separate(tag, c("Organism-ish", "Lability"), sep = "_")
+
+l_t0 <- labile_accumulite_RA_meta_full%>%
+  filter(Timepoint == "T0" ,
+         Lability == "labile")
+
+a_tf <- labile_accumulite_RA_meta_full%>%
+  filter(Timepoint == "T0",
+         Lability == "accumulite")
+
+labile_accumulite_RA_meta <- bind_rows(l_t0, a_tf)%>%
+  mutate(Lability = case_when(Lability == "labile" ~ "Labile Exudate",
+                              Lability == "accumulite" ~ "Microbial Accumulite",
+                              TRUE ~ as.character(Lability)))
+
+labile_accumulite_RA_meta$Lability <- factor(labile_accumulite_RA_meta$Lability, levels = c("Labile Exudate", "Microbial Accumulite"))
+
+labile_accumulite_RA_meta$`chemical composition` <- factor(labile_accumulite_RA_meta$`chemical composition`, 
+                                                levels = c("", "CH", "CHOP", "CHONP", "CHNP", "CHON", "CHN", "CHO"))
+
+lacolors <- labile_accumulite_RA_meta$color
+
+names(lacolors) <- labile_accumulite_RA_meta$`chemical composition`
+
+pdf("all_plots.pdf", height = 5, width = 7)
+labile_accumulite_RA_meta%>%
+  split(list(.$`Organism-ish`))%>%
+  map(~ggplot(., aes(x = Organism, y= (RA*100), fill = `chemical composition`)) +
+        geom_bar(stat = "summary", fun.y = "sum") +
+        scale_fill_manual(values= lacolors)+
+        ggtitle(unique(.$`Organism-ish`)) +
+        theme(
+          axis.text.x = element_text(angle = 60, hjust = 1),
+          panel.background = element_rect(fill = "transparent"), # bg of the panel
+          plot.background = element_rect(fill = "transparent", color = NA), # bg of the plot
+          panel.grid.major = element_blank(), # get rid of major grid
+          panel.grid.minor = element_blank(), # get rid of minor grid
+          legend.background = element_rect(fill = "transparent"), # get rid of legend bg
+          legend.box.background = element_rect(fill = "transparent") # get rid of legend panel bg
+        ) +
+        facet_wrap(~Lability) +
+        xlab("Canopus Level 3") + 
+        ylab("Relative Abundance (percent)"))
+dev.off()
 
 
 # WRITING -- Dataframe for Cytoscape ------------------------------

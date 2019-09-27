@@ -2,6 +2,7 @@
 ## Editted and re-written by Zach Quinlan (1/30_2019) for CRUSADE manuscript
 ## This should be able to take the raw outputs from mothur and give a working df
 
+# LOADING -- libraries ----------------------------------------------------
 # Libraries for cleaning
 library(DescTools)
 library(tidyverse)
@@ -13,14 +14,14 @@ library(MASS)
 library(factoextra)
 library(ape)
 
-# Read in data frames  -----------------------------------------------------
+# LOADING -- Read in data frames  -----------------------------------------------------
 # These are the raw outputs from mothur
 taxon_file <- read_tsv("Undetermined_S0_L001_R1_001.trim.contigs.good.good.unique.filter.good.precluster.pick.pick.subsample.opti_mcc.0.03.cons.taxonomy.txt")
 ra_file <- read_tsv("Undetermined_S0_L001_R1_001.trim.contigs.good.good.unique.filter.good.precluster.pick.pick.subsample.opti_mcc.relabund.txt")%>%
   gather(OTU, RA, 4:6522)%>%
   spread(Group, RA)
 
-# Join two tables and seperate taxonomy -----------------------------------
+# DATAFRAME PREP -- Join two tables and seperate taxonomy -----------------------------------
 crusade_df <-left_join(taxon_file, ra_file, by = "OTU")%>%
   separate(Taxonomy, paste("Taxonomy", 1:7, sep = "."), sep = ";")%>%
   dplyr::select(-c(OTU, Size, label, numOtus))%>%
@@ -32,7 +33,7 @@ crusade_df <-left_join(taxon_file, ra_file, by = "OTU")%>%
                 "Genus"   = "Taxonomy.6",
                 "OTU"     = "Taxonomy.7")
 
-# Cleaning all naming columns ---------------------------------------------
+# DATAFRAME PREP -- Cleaning all naming columns ---------------------------------------------
 ## These are changing all unidentified classifiers to a single value so that 
 ## If there are two different unclassified/unidentified OTU of the same genus they will be combined into one unidentified genus
 cleaned <- crusade_df%>%
@@ -92,7 +93,7 @@ transposed_graphing <- OFGO%>%
   gather(sample_code, RA, 2:32)%>%
   spread(OFGO, RA)
 
-# Designing working df for stats and such ---------------------------------
+# DATAFRAME PREP -- Designing working df for stats and such ---------------------------------
 working_df <- transposed_transformed%>%
   separate(sample_code, paste("C", 1:4, sep = "."), sep = "_", remove = FALSE)%>%
   rename(Organism = `C.1`,
@@ -133,7 +134,7 @@ graphing_df <- transposed_graphing%>%
 
 write_csv(working_df, "Crusade_wdf.dat ")
 write_csv(graphing_df, "Crusade_graphing_df.dat")
-# Subsetted dataframes-------------------------------------------------------
+# DATAFRAME PREP -- Subsetted dataframes-------------------------------------------------------
 # Bacterioplankton whole df
 bacterioplankton_df <- working_df %>%
   dplyr::filter(Timepoint == "T3") %>%
@@ -167,7 +168,7 @@ cca_microb <- working_df %>%
 cca_microb_abun <- cca_microb %>%
   dplyr::select(-c(Organism, sample_code))
 
-# Running PERMANOVAs ------------------------------------------------------
+# STATS -- PERMANOVAs ------------------------------------------------------
 # Bacterioplankton unfiltered
 adonis(bacterio_un_abun ~ Organism, bacterio_unfilt, perm=1000, method="bray", set.seed(100))
 
@@ -177,7 +178,7 @@ adonis(bacterio_f_abun ~ Organism, bacterio_filt, perm=1000, method="bray", set.
 # CCA Microbiome
 adonis(cca_microb_abun ~ Organism, cca_microb, perm=1000, method="bray", set.seed(100))
 
-# Running Two-Way ANOVAs OTU -----------------------------------------------------
+# STATS -- Two-Way ANOVAs OTU -----------------------------------------------------
 only_cca <- working_df%>%
   dplyr::filter(!Organism == "Calcium Carbonate Control",
                 !Organism == "Water Control",
@@ -230,7 +231,7 @@ anova_FDR <- anova_all%>%
 ## Printing Anova Sig tables
 write_csv(anova_FDR, "ANOVA_FDRsigs_All.dat")
 
-# Mean RA’s of Significant OTUs -------------------------------------------
+# META-STATS -- Mean RA’s of Significant OTUs -------------------------------------------
 sig_otus <- as.vector(anova_FDR$Clade)
 
 sig_otus_microbiome <- anova_FDR%>%
@@ -284,7 +285,7 @@ mean_sigs_bacterioplaknton <- full_join(water_sig_otu, organism_sig_otu)
 write_csv(mean_sigs_bacterioplaknton, "significant_OTU_means_bact.dat")
 write_csv(microbiome_sig_otu, "significant_OTU_means_micro.dat")
 
-# Making PCoA's-----------------------------------------------------------
+# VISUALIZATIONS -- Making PCoA's-----------------------------------------------------------
 bacterioplankton_noh20 <-bacterioplankton_df%>%
   filter(Organism != "Water Control")
 #making abundance only matrix and saving columns with names/metadata into dinames
@@ -355,7 +356,7 @@ dev.off()
 
 
 write.csv(pco_scores, "PCo_scores.dat")           # This will print the Scores to remake the figure in JMP because JMP is bae
-# Making Pie Charts -------------------------------------------------------
+# DATAFRAME PREP -- Making Pie Charts data frames -------------------------------------------------------
 class_renamed <-class_order%>%
   mutate(Class = case_when(Class == "Alphaproteobacteria" ~ "Alphaproteobacteria",
                            Class == "Cyanobacteria" ~ "Cyanobacteria",
@@ -425,7 +426,7 @@ HR_CCA <-cr_CCA_combine%>%
 PO_CCA <-cr_CCA_combine%>%
   dplyr::filter(Organism == "Porolithon onkodes")
 
-# FINDING ONLY Classes WITH GREATER THAN 2% ABUNDNACE  -------------------
+# DATAFRAME PREP -- FINDING ONLY Classes WITH GREATER THAN 2% ABUNDNACE  -------------------
 #Filtering to only X Rabundances, tried to limit to ~10 different classes
 # This can be used to find the 
 # bact_filt_02 <- cr_bact_filt_combine%>%
@@ -440,7 +441,7 @@ PO_CCA <-cr_CCA_combine%>%
 #   ungroup(cr_CCA_combine)%>%
 #   dplyr::filter(!Organism == "Calcium Carbonate Control")
 
-# ACTUAL VISUALIZATION OF THE PIE CHARTS ----------------------------------
+# VIZUALIZATION -- PIE CHARTS ----------------------------------
 #Visualize Pie Charts
 #Filtered treatments
 PO_filt_ggp <-ggplot(PO_filt, aes(x= "", y=RA, fill = Class, colour = pal)) +
@@ -480,7 +481,7 @@ PO_filt_pie
 # ggsave(filename = "HR_filt.pdf", plot= HR_filt_pie)
 
 
-# ANOVA Order -------------------------------------------------------------
+# STATS -- ANOVA Order -------------------------------------------------------------
 Order_filtered <-class_order %>%
   group_by(Order)%>%
   summarize_if(is.numeric, sum)%>%
@@ -523,7 +524,7 @@ Order_CCA <- Order_wdf%>%
   dplyr::filter(DNA.Source == "CCA Microbiome")
 
 
-# Messing with Anova’s for ORDER summed data -----------------------------
+# STATS -- ANOVAS ORDER summed data -----------------------------
 ##This appears breifly in the manuscript when I cite the one-way anovas for Orders in relation to the pie charts
 orders <- c("Rhodospirillales", "Rhodobacterales", "Rhizobiales", "Alteromonadales",
             "Flavobacteriales", "Sphingobacteriales", 
@@ -557,7 +558,7 @@ anova_FDR_orders <- Anova_all_orders%>%
 
 write_csv(Order_wdf, "CRUSADE_Order_WDF.dat")
 
-# Class Standard Deviations -----------------------------------------------
+# META-STATS -- Class Standard Deviations -----------------------------------------------
 
 class_only <- raw_pie%>%
   dplyr::select(-c(Order, Timepoint))%>%
@@ -602,4 +603,52 @@ means_bacter$std <- apply(means_bacter[4:9], 1, FUN = sd)
 
 means_CCA$Mean <- apply(means_CCA[4:9], 1, FUN = mean)
 means_CCA$std <- apply(means_CCA[4:9], 1, FUN = sd)
+
+
+# SUPPLEMENTAL TABLE 1 ----------------------------------------------------
+library(tidyverse)
+
+fd_fc <- read_csv("CRUSADE_fDOM_FCM.csv")%>%
+  dplyr::select(-c(7:47))
+
+fd_fc_clean <- fd_fc%>%
+  dplyr::select(-c(1,2,Replicate,14:ncol(.)))%>%
+  filter(!Timepoint == "2",
+         !Inhabitant == "Water Control")%>%
+  gather(fluor, RA_cm2, 4:ncol(.))%>%
+  unite(name, c(Inhabitant, Water, fluor, Timepoint), sep = "_")%>%
+  group_by(name)%>%
+  summarize_if(is.numeric, mean)%>%
+  ungroup()%>%
+  separate(name, c('Inhabitant', 'Water', 'fluor', 'Timepoint'), sep = "_")%>%
+  mutate(Timepoint = case_when(Timepoint == "1" ~ "one",
+                               Timepoint == "3" ~ "three",
+                               TRUE ~ as.character(Timepoint)))%>%
+  spread(Timepoint, RA_cm2)%>%
+  add_column(rate = (.$three-.$one)/8)
+
+supp_table <- fd_fc_clean%>%
+  dplyr::select(-c("three","one"))%>%
+  spread(fluor, rate)
+
+ggplot(fd_fc_clean, aes(x = Inhabitant, y = rate, fill = Water))+
+  geom_boxplot(stat = "boxplot", fun.y = "mean", position = "dodge2")+
+  theme(
+    panel.background = element_rect(fill = "transparent"), # bg of the panel
+    plot.background = element_rect(fill = "transparent", color = NA), # bg of the plot
+    panel.grid.major.y = element_line(size = 0.2, linetype = 'solid',colour = "gray"), # get rid of major grid
+    # panel.grid.minor.x = element_line(size = 0.5, linetype = 'solid',colour = "black"), # get rid of minor grid
+    legend.background = element_rect(fill = "transparent"), # get rid of legend bg
+    legend.box.background = element_rect(fill = "transparent"), # get rid of legend panel bg
+    axis.text.x = element_text(angle = 75, hjust = 1,face = "italic"),
+    axis.title = element_text(face = "italic"),
+    strip.text = element_text(face = "italic")
+  ) +
+  facet_wrap(~ fluor) +
+  xlab("Organism") +
+  ylab("fluorophore (R.U. cm-2 h-1")
+
+
+write_csv(supp_table, "Supplemental_table1.csv")
+
 
