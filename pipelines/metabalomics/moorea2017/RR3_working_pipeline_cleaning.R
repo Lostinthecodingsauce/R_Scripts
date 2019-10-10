@@ -67,7 +67,7 @@ networking_elements[is.na(networking_elements)] <- 0
 networking_energy <- networking_elements%>%
   dplyr::select(c(1, 'C', 'H', 'N', 'O', 'P', 'S'))%>%
   add_column(NOSC = (-((4*.$C + .$H - 3*.$N - 2*.$O + 5*.$P - 2*.$S)/.$C)+4))%>%
-  add_column(cox_gibbs_energy = 60.3-28.5*.$NOSC)
+  add_column(dG = 60.3-28.5*.$NOSC)
 
 # PRE-CLEANING -- Canopus---------------------------
 
@@ -99,7 +99,7 @@ super_computer_annotations <- full_join(full_join(canopus_filtered_tidy,
                                         networking_energy, by = "feature_number")%>%
   add_column(`characterization scores` = .$`quality`)%>%
   mutate(`characterization scores` = case_when(`characterization scores` != "Good" ~ "Bad quality",
-                                               SiriusScore < .98 ~ "Low probability",
+                                               ZodiacScore < .98 ~ "Low probability",
                                                TRUE ~ as.character(`characterization scores`)))
 
 
@@ -212,7 +212,7 @@ feature_table_no_back_trans <- feature_table_dirty%>%
   spread(sample, val)
 
 # CLASSIFYING -- Ambient or Exudate features FOR RR3 ONLY ------------------------------
-# Calculating exudates as mean(TF)/Mean(Water T0) > 1
+# Calculating exudates as TF/Water T0 > 1
 # Replacing all 0's with 1000.
 ambient_exudate_features_temp <- feature_table_no_back_trans%>%
   gather(sample_name, peak_area, 2:ncol(.))%>%
@@ -337,56 +337,41 @@ exudate_table_wdf_temp <- exudate_feature_table_combined%>%
 
 # NORMALIZATION -- NOSC and energy to C -----------------------------------
 # Percent is Reltaive Abundance * C content of feature
-percent_c_prep <- exudate_table_wdf_temp%>%
-  filter(`characterization scores` == "Good")
-
-exudate_percent_total_C <- as.data.frame(
-  sapply(
-    percent_c_prep[188:229],
-    function(x) x*percent_c_prep$C))%>%
-  add_column(feature_number = percent_c_prep$feature_number, .before =1)
-
-# carbon normalized divides percent total C by the sum percent C of each sample
-carbon_norm_temp <- exudate_percent_total_C%>%
-  gather(sample, percent_c, 2:ncol(.))%>%
-  spread(feature_number, percent_c)%>%
-  add_column(sum = apply(.[2:ncol(.)], 1, sum, na.rm = TRUE))
-
-carbon_normalized <- as.data.frame(
-  sapply(
-    carbon_norm_temp[2:ncol(carbon_norm_temp)],
-    function (x) x/carbon_norm_temp$sum))%>%
-  add_column(sample = carbon_norm_temp$sample, .before =1)%>%
-  dplyr::select(-sum)
-
-# Carbon normalized NOSC multiplies the carbon normalized value by the oxidation state of carbon
-carbon_normalized_NOSC_temp <- right_join(metadata, 
-                                         carbon_normalized%>% 
-                                           gather(feature_number, ra, 2:ncol(.))%>%
-                                           spread(sample, ra), 
-                                         by = "feature_number")
-
-carbon_normalized_NOSC <- as.data.frame(
-  sapply(
-    carbon_normalized_NOSC_temp[129:ncol(carbon_normalized_NOSC_temp)],
-    function(x) x*carbon_normalized_NOSC_temp$NOSC))%>%
-  add_column(feature_number = carbon_normalized_NOSC_temp$feature_number, .before =1)
-    
+carbon_normalized_NOSC <- exudate_table_wdf_temp%>%
+  group_by(exudate_behavior)%>%
+  nest()%>%
+  mutate(data = map(data, ~filter(.x, `characterization scores` == "Good")%>%
+                      dplyr::select(c(feature_number, C, ends_with("_RA")))%>%
+                      gather(sample_name, asin, 3:ncol(.))%>%
+                      mutate(percent_total_C = asin*C)%>%
+                      group_by(sample_name)%>%
+                      mutate(sum_c = sum(percent_total_C))%>%
+                      mutate(carbon_norm_temp = percent_total_C/sum_c)%>%
+                      ungroup()%>%
+                      right_join(metadata%>%
+                                   dplyr::select(c(feature_number, NOSC)),
+                                 .,  by = "feature_number")%>%
+                      mutate(carbon_normalized_NOSC = carbon_norm_temp*NOSC)%>%
+                      dplyr::select(c(feature_number, sample_name, carbon_normalized_NOSC))%>%
+                      mutate(sample_name = gsub("_RA", "_RAC", sample_name))%>%
+                      spread(sample_name, carbon_normalized_NOSC)))%>%
+  unnest(data)
+  
 
 # PRE-CLEANING -- adding carbon normalized values to wdf ------------------
-exudate_table_wdf <- left_join(exudate_table_wdf_temp, carbon_normalized_NOSC, 
-                               by = 'feature_number', suffix = c("", "C"))
+exudate_table_wdf <- left_join(exudate_table_wdf_temp, carbon_normalized_NOSC, by = 'feature_number')
 
 write_csv(exudate_table_wdf, "RR3_exudate_feature_table_master_post_filtered.csv")
 
 # PRE-CLEANING -- Making Mo’orea working data frame for stats -----------------------------
 rr3_transposed <- exudate_table_wdf%>%
-  dplyr::select(c(feature_number, `Blank_Lot_6350565_01.asin(sqrt)`:ncol(.)))%>%
+  filter(exudate_behavior == "exudate")%>%
+  dplyr::select(c(feature_number, ends_with("_asin")))%>%
   gather(sample_ID, angular, 2:ncol(.))%>%
   spread(feature_number, angular)
 
 rr3_transposed$sample_ID <- rr3_transposed$sample_ID%>%
-  gsub(".asin\\(sqrt)", "", .)%>%
+  gsub("_asin", "", .)%>%
   gsub("-", "_", .)
 
 blanks_wdf <- rr3_transposed%>%
@@ -541,17 +526,21 @@ dunnets_pvalues <- rr3_organism_post_hoc%>%
                                     is.na(`Pocillopora verrucosa_dunnetts`)  &
                                     is.na(`Porites lobata_dunnetts`) ~ "Turf",
                                   number_exudate_organisms > 3 ~ "Primary Producers",
-                                  TRUE ~ "Cosmo"))
+                                  TRUE ~ "Cosmo"))%>%
+  ungroup()%>%
+  gather(label, value, 3:ncol(.))%>%
+  unite(label_b, c(label, DayNight), sep = "_")%>%
+  spread(label_b, value)
+  
   
 
 # POST STATS -- Tulkey summary table --------------------------------------
-
-
-tukey_pvalues <- rr3_organism_post_hoc%>%
-  dplyr::select(c(DayNight, feature_number, tukey))
-  unnest(tukey)
-  as.data.frame()
-  filter(FDR < 0.05)
+## Not yet implimented, however the data has been analyzed
+# tukey_pvalues <- rr3_organism_post_hoc%>%
+#   dplyr::select(c(DayNight, feature_number, tukey))
+#   unnest(tukey)
+#   as.data.frame()
+#   filter(FDR < 0.05)
 
 # STATS -- PERMANOVA ------------------------------------------------------
 permanovas_one_way <- rr3_wdf%>%
@@ -643,6 +632,11 @@ all_rr3_pcoa%>%
 dev.off()
   
 
+# FINAL TABLES -- feature_table_post_stats------------------------------------------------
+feature_table_post_stats <- left_join(exudate_table_wdf, dunnets_pvalues, by = "feature_number")
+
+write_csv(feature_table_post_stats, 
+          "~/Documents/SDSU/Moorea_2017/RR3/10022019_exudate_ambient/RR3_feature_table_post_stats.csv")
 # VISUALIZATIONS -- XIC values ambient vs exudates ------------------------
 rr3_xic <- left_join(exudates_column, feature_table_no_back_trans, by = "feature_number")%>%
   dplyr::select(-c(3:10, 53))%>%
