@@ -307,24 +307,26 @@ sum_table <-
 
 write_csv(sum_table, "~/Documents/SDSU/Moorea_2017/cleaning_summary.csv")
 # RELATIVIZATION AND NORMALIZATION -- grouped by ambient or exudate -----------------
-feature_table_relnorm <- ambient_exudate_no_back_trans%>%
-  dplyr::select(-exudate_diel)%>%
-  group_by(exudate_behavior)%>%
-  nest()%>%
-  mutate(data = map(data, ~ gather(.x, sample_name, peak_area, 2:ncol(.))%>%
-                      spread(feature_number, peak_area)%>%
-                      add_column(TIC = apply(.[2:ncol(.)], 1, sum, .before = 1))),
-         transformations = map(data, ~ gather(.x, feature_number, xic, 2:(ncol(.x)-1))%>%
-                                    mutate(RA = .$xic/.$TIC)%>%
-                                    mutate(asin = asin(sqrt(RA)))))%>%
-  dplyr::select(-data)%>%
-  unnest(transformations)%>%
+feature_table_TIC <- ambient_exudate_no_back_trans%>%
+  dplyr::select(-c(exudate_diel, exudate_behavior))%>%
+  # group_by(exudate_behavior)%>%
+  # nest()%>%
+  # mutate(data = map(data, ~ 
+  gather(sample_name, peak_area, 2:ncol(.))%>%
+  spread(feature_number, peak_area)%>%
+  add_column(TIC = apply(.[2:ncol(.)], 1, sum), .before = 2)
+
+feature_table_relnorm <- feature_table_TIC%>%
+         # transformations = map(data, ~ 
+  gather(feature_number, xic, 3:(ncol(.)))%>%
+  mutate(RA = .$xic/.$TIC)%>%
+  mutate(asin = asin(sqrt(RA)))%>%
   dplyr::select(-TIC)%>%
   gather(transformation, values, xic:asin)%>%
   arrange(transformation)%>%
   unite(sample_transformed, c("sample_name", "transformation"), sep = "_")%>%
   spread(sample_transformed, values)%>%
-  right_join(ambient_exudate_no_back_trans[1:2], ., by = "feature_number")
+  right_join(ambient_exudate_no_back_trans[1:3], ., by = "feature_number")
 
 # PRE-CLEANING -- Build feature table working data frame ----------------------------------
 # All three joined together (Peak area, RA, asin(sqrt))
@@ -336,27 +338,43 @@ exudate_table_wdf_temp <- exudate_feature_table_combined%>%
 
 
 # NORMALIZATION -- NOSC and energy to C -----------------------------------
-# Percent is Reltaive Abundance * C content of feature
-carbon_normalized_NOSC <- exudate_table_wdf_temp%>%
-  group_by(exudate_behavior)%>%
-  nest()%>%
-  mutate(data = map(data, ~filter(.x, `characterization scores` == "Good")%>%
-                      dplyr::select(c(feature_number, C, ends_with("_RA")))%>%
-                      gather(sample_name, asin, 3:ncol(.))%>%
-                      mutate(percent_total_C = asin*C)%>%
-                      group_by(sample_name)%>%
-                      mutate(sum_c = sum(percent_total_C))%>%
-                      mutate(carbon_norm_temp = percent_total_C/sum_c)%>%
-                      ungroup()%>%
-                      right_join(metadata%>%
-                                   dplyr::select(c(feature_number, NOSC)),
-                                 .,  by = "feature_number")%>%
-                      mutate(carbon_normalized_NOSC = carbon_norm_temp*NOSC)%>%
-                      dplyr::select(c(feature_number, sample_name, carbon_normalized_NOSC))%>%
-                      mutate(sample_name = gsub("_RA", "_RAC", sample_name))%>%
-                      spread(sample_name, carbon_normalized_NOSC)))%>%
-  unnest(data)
+# Percent is Reltaive Abundance * C content of feature Final equation is (RA*C) / (sum(RA*C)) * NOSC
+carbon_normalized_ra_NOSC <- exudate_table_wdf_temp%>%
+  filter(`characterization scores` == "Good")%>%
+  dplyr::select(c(feature_number, C, ends_with("_RA")))%>%
+  gather(sample_name, ra, 3:ncol(.))%>%
+  mutate(percent_total_C = ra*C)%>%
+  group_by(sample_name)%>%
+  mutate(sum_c = sum(percent_total_C))%>%
+  mutate(carbon_norm_temp = percent_total_C/sum_c)%>%
+  ungroup()%>%
+  right_join(metadata%>%
+               dplyr::select(c(feature_number, NOSC)),
+             .,  by = "feature_number")%>%
+  mutate(carbon_normalized_NOSC = carbon_norm_temp*NOSC)%>%
+  dplyr::select(c(feature_number, sample_name, carbon_normalized_NOSC))%>%
+  mutate(sample_name = gsub("_RA", "_RAC", sample_name))%>%
+  spread(sample_name, carbon_normalized_NOSC)
   
+# Percent is XIC * C content of feature 
+carbon_normalized_xic_NOSC <- exudate_table_wdf_temp%>%
+  filter(`characterization scores` == "Good")%>%
+  dplyr::select(c(feature_number, C, ends_with("_xic")))%>%
+  gather(sample_name, xic, 3:ncol(.))%>%
+  mutate(percent_total_C = xic*C)%>%
+  group_by(sample_name)%>%
+  mutate(sum_c = sum(percent_total_C))%>%
+  mutate(carbon_norm_temp = percent_total_C/sum_c)%>%
+  ungroup()%>%
+  right_join(metadata%>%
+               dplyr::select(c(feature_number, NOSC)),
+             .,  by = "feature_number")%>%
+  mutate(carbon_normalized_NOSC = carbon_norm_temp*NOSC)%>%
+  dplyr::select(c(feature_number, sample_name, carbon_normalized_NOSC))%>%
+  mutate(sample_name = gsub("_xic", "_xicc", sample_name))%>%
+  spread(sample_name, carbon_normalized_NOSC)
+
+carbon_normalized_NOSC <- full_join(carbon_normalized_ra_NOSC, carbon_normalized_xic_NOSC, by = "feature_number")
 
 # PRE-CLEANING -- adding carbon normalized values to wdf ------------------
 exudate_table_wdf <- left_join(exudate_table_wdf_temp, carbon_normalized_NOSC, by = 'feature_number')
