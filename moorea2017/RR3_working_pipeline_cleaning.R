@@ -55,7 +55,7 @@ ms_sample_codes <- read_csv("Mo'orea 2017 Mass spec sample codes - Sheet1.csv")%
   rename('run_code' = 'Sample ID',
          'sample_code' = 'Sample Name')
 
-# PRE-CLEANING -- SIRIUS_Zodiac elemental composition of molecular formulas -------------------------------------------
+# CLEANING -- SIRIUS_Zodiac elemental composition of molecular formulas -------------------------------------------
 networking_elements <- sirius_zodiac_anotations%>%
   filter(!ZodiacMF == "not_explainable")%>%
   group_by(feature_number)%>% 
@@ -69,7 +69,7 @@ networking_energy <- networking_elements%>%
   add_column(NOSC = (-((4*.$C + .$H - 3*.$N - 2*.$O + 5*.$P - 2*.$S)/.$C)+4))%>%
   add_column(dG = 60.3-28.5*.$NOSC)
 
-# PRE-CLEANING -- Canopus---------------------------
+# CLEANING -- Canopus---------------------------
 
 canopus_annotation_names <- canopus_anotations%>%
   gather(canopus_annotation, canopus_probability, 2:ncol(.))
@@ -104,7 +104,7 @@ super_computer_annotations <- full_join(full_join(canopus_filtered_tidy,
 
 
 
-# PRE-CLEANING -- metadata and raw faeture table --------------------------
+# PRE-CLEANING -- metadata and filter out bad samples --------------------------
 ## join library hits, analog hits and super computer predictions
 metadata <- full_join(node_info, 
                       full_join(super_computer_annotations,
@@ -179,28 +179,28 @@ feature_table_no_background_trans_finder <- feature_table_dirty%>%
   gather(sample, xic, 2:ncol(.))%>%
   separate(sample, "experiment", sep = "_", remove = FALSE, extra = "drop")%>%
   filter(!experiment %like% "%Blank%")%>%
-  mutate(experiment = case_when(experiment == "D" ~ "Dorcierr",
-                                experiment == "M" ~ "Mordor",
-                                experiment == "R" ~ "RR3",
-                                TRUE ~ as.character(experiment)))%>%
-  split(.$experiment)%>%
-  map(~ spread(., sample, xic))%>%
-  map(~ add_column(., trans_feature_finder = rowSums(.[3:ncol(.)] > 2E5), .before = 3))%>%
-  map(~ mutate(., experiment = case_when(trans_feature_finder >= 3 ~ "real",
-                                      TRUE ~ "transient")))
-
-feature_table_no_back_trans_filter <- feature_table_dirty[1]%>%
-  add_column(background_features = no_background$background, .after = 1)%>%
-  add_column(SPIFFy_transient = feature_table_no_background_trans_finder$SPIFFy$experiment, .after = 2)%>%
-  add_column(Mordor_transient = feature_table_no_background_trans_finder$Mordor$experiment, .after = 2)%>%
-  add_column(RR3_transient = feature_table_no_background_trans_finder$RR3$experiment, .after = 2)%>%
-  add_column(Dorcierr_transient = feature_table_no_background_trans_finder$Dorcierr$experiment, .after = 2)
+  filter(!sample %like% "%Blank%")%>%
+  mutate(experiment = case_when(experiment == "D" ~ "Dorcierr_transient",
+                                experiment == "M" ~ "Mordor_transient",
+                                experiment == "R" ~ "RR3_transient",
+                                TRUE ~ "SPIFFy_transient"))%>%
+  group_by(experiment)%>%
+  nest()%>%
+  mutate(data = map(data, ~ spread(.x, sample, xic)%>%
+                      add_column(trans_feature_finder = rowSums(.[3:ncol(.)] > 2E5), .before = 2)%>%
+                      mutate(transient = case_when(trans_feature_finder >= 3 ~ "real",
+                                                   TRUE ~ "transient"))%>%
+                      dplyr::select(c(feature_number, transient))))%>%
+  unnest(data)%>%
+  spread(experiment, transient)
 
 
+feature_table_no_back_trans_filter <- full_join(feature_table_no_background_trans_finder, no_background, by = "feature_number")%>%
+  dplyr::select(feature_number, background, everything())
 
 # FILTERING -- out background and transient features ----------------------
 rr3_real_features <- as.vector(feature_table_no_back_trans_filter%>%
-                                 filter(background_features == "real")%>%
+                                 filter(background == "real")%>%
                                  filter(RR3_transient == "real"))$feature_number
 
 feature_table_no_back_trans <- feature_table_dirty%>%
@@ -263,7 +263,7 @@ sum_table_starting_values <- feature_table_dirty%>%
 
 sum_table_background_removal <- left_join(feature_table_no_back_trans_filter[1:2], feature_table_dirty,
                                           by = "feature_number")%>%
-  filter(background_features == "real")%>%
+  filter(background == "real")%>%
   dplyr::select(-2)%>%
   gather(sample_name, sample_TIC_background_removal, 2:ncol(.))%>%
   add_column(background_removal_features = 1)%>%
@@ -275,21 +275,22 @@ not_background <- as.vector(no_background%>%
                               filter(background == "real"))$feature_number
 
 sum_table_transient_removal <- feature_table_no_background_trans_finder%>%
-  map(~ filter(., feature_number %in% not_background))%>%
-  map(~ filter(., experiment == "real"))%>%
-  map(~ dplyr::select(., -c(2:3)))%>%
-  map(~ gather(., sample_name, sample_TIC, 2:ncol(.)))%>%
-  map(~ add_column(., transient_removal_features = 1))%>%
-  map(~ group_by(., sample_name))%>%
-  map(~ summarize_if(., is.numeric, sum))%>%
-  map(~ ungroup(.))
+  gather(experiment, transient, 2:ncol(.))%>%
+  filter(feature_number %in% not_background)%>%
+  filter(transient == "real")%>%
+  dplyr::select(-3)%>%
+  left_join(., feature_table_dirty, by = "feature_number")%>%
+  gather(sample_name, sample_TIC, 3:ncol(.))%>%
+  add_column(transient_removal_features = 1)%>%
+  separate(sample_name, 'first_letter', sep = 1, remove = FALSE)%>%
+  separate(experiment, 'first_exp', sep = 1, remove = FALSE)%>%
+  filter(first_letter == .$first_exp)%>%
+  filter(!sample_name %like% "%Blank%")%>%
+  group_by(., sample_name)%>%
+  summarize_if(., is.numeric, sum)%>%
+  ungroup(.)
 
-sum_table_all_transient <- bind_rows(sum_table_transient_removal$Dorcierr,
-                                     sum_table_transient_removal$Mordor,
-                                     sum_table_transient_removal$RR3,
-                                     sum_table_transient_removal$SPIFFy)
-
-sum_table_exudate_features <- exudate_no_back_trans%>%
+sum_table_exudate_features <- feature_table_no_back_trans%>%
   gather(sample_name, RR3_exudate_TIC, 2:ncol(.))%>%
   add_column(RR3_exudate__features = 1)%>%
   group_by(sample_name)%>%
@@ -302,11 +303,11 @@ sum_table <-
     left_join(
       left_join(
         sum_table_starting_values, sum_table_background_removal, by = "sample_name"),
-      sum_table_all_transient, by = "sample_name"),
-    sum_table_exudate_features, by = "sample_name")
-
-write_csv(sum_table, "~/Documents/SDSU/Moorea_2017/cleaning_summary.csv")
-# RELATIVIZATION AND NORMALIZATION -- grouped by ambient or exudate -----------------
+      sum_table_transient_removal, by = "sample_name"),
+    sum_table_exudate_features, by = "sample_name")%>%
+  filter(sample_name %like any% c("%Blank%","R_%", "D_%", "M_%", "SPIFFy_%"))%>%
+  filter(!sample_name %like any% c("%C18%", "%XAD%"))
+# RELATIVIZATION AND NORMALIZATION -- RA_asin ->Not grouped by ambient or exudate -----------------
 feature_table_TIC <- ambient_exudate_no_back_trans%>%
   dplyr::select(-c(exudate_diel, exudate_behavior))%>%
   # group_by(exudate_behavior)%>%
@@ -379,7 +380,7 @@ carbon_normalized_NOSC <- full_join(carbon_normalized_ra_NOSC, carbon_normalized
 # PRE-CLEANING -- adding carbon normalized values to wdf ------------------
 exudate_table_wdf <- left_join(exudate_table_wdf_temp, carbon_normalized_NOSC, by = 'feature_number')
 
-write_csv(exudate_table_wdf, "RR3_exudate_feature_table_master_post_filtered.csv")
+write_csv(exudate_table_wdf, "RR3_feature_table_master_post_filtered.csv")
 
 # PRE-CLEANING -- Making Mo’orea working data frame for stats -----------------------------
 rr3_transposed <- exudate_table_wdf%>%
@@ -650,11 +651,13 @@ all_rr3_pcoa%>%
 dev.off()
   
 
-# FINAL TABLES -- feature_table_post_stats------------------------------------------------
+# WRITING -- feature_table_post_stats------------------------------------------------
 feature_table_post_stats <- left_join(exudate_table_wdf, dunnets_pvalues, by = "feature_number")
 
 write_csv(feature_table_post_stats, 
           "~/Documents/SDSU/Moorea_2017/RR3/10022019_exudate_ambient/RR3_feature_table_post_stats.csv")
+
+write_csv(sum_table, "~/Documents/SDSU/Moorea_2017/RR3/10022019_exudate_ambient/RR3_summary_table.csv")
 # VISUALIZATIONS -- XIC values ambient vs exudates ------------------------
 rr3_xic <- left_join(exudates_column, feature_table_no_back_trans, by = "feature_number")%>%
   dplyr::select(-c(3:10, 53))%>%
