@@ -600,7 +600,7 @@ pco_scores_rr3 <- as.data.frame(rr3_pcoa$vectors)%>%
   add_column(Organism = filter(rr3_wdf, Timepoint == "TF")$Organism,
              test = "both",
              DayNight = filter(rr3_wdf, Timepoint == "TF")$DayNight,
-             Replicate = filter(rr3_wdf, Timepoint == "TF")$Replicate , .before = 1)
+             Replicate = filter(rr3_wdf, Timepoint == "TF")$Replicate, .before = 1)
 
 # Effect of both Day and Night on organism (grouped)
 rr3_pcoa_grouped <- rr3_wdf%>%
