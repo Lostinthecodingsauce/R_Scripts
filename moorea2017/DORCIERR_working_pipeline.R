@@ -627,6 +627,42 @@ organism_order <- as.factor(dom_organism_post_hoc$Organism)%>%
   levels()%>%
   as.vector()
 
+## Notes from the Captain 
+# There a lot of parrelization packages in R the easiest ones to use if you are
+# used to purrr syntax is future + furrr. Future does all the specifications for
+# how to plan a parellel process, furrr is a nice wrapper to use purrr syntax in
+# parellel.
+
+install.packages(c("future", "furrr")) # do this once
+library(furrr) # furrr requuires future and gets imported by default
+num_cores <- availibleCores() - 1 # don't murder your compututer and save your self a core
+# this is the parellel planning step (changes global env so this is plan for all parellel 
+# work unless specificed otherwise)
+plan(multiprocess, workers = num_cores) #defaults to sequential process, multiprocess is one option for parellel 
+
+## Notes from the Captain
+## I commented out your code and wrote mine below
+# org_dunnetts_exudates <- dom_organism_post_hoc%>%
+#   group_by(Timepoint, DayNight, feature_number)%>%
+#   mutate(sum = sum(asin))%>%
+#   filter(!sum == 0)%>%
+#   dplyr::select(-sum)%>%
+#   ungroup()%>%
+#   mutate(Organism = factor(Organism))%>%
+#   mutate(Organism = fct_relevel(Organism, organism_order))%>%
+#   group_by(Timepoint, feature_number, DayNight)%>%
+#   nest()%>%
+#   mutate(anova = map(data, ~ aov(asin ~ Organism, .x)),
+#          dunnett = map(anova, ~ glht(.x, linfct = mcp(Organism = "Dunnett"))),
+#          dunnett_summary = map(dunnett, ~summary(.x)%>%
+#                                  tidy()),
+#          tukey = map(anova, ~ TukeyHSD(.x, p.adjust.methods = "BH")))
+
+
+## Notes from the Captain
+# you might try and reduce the number of map() you use. The costly parts of
+# parellel is the planning and recombining the data IE a couple of
+# computationally heavy tasks is better than 50 simple tasks.
 org_dunnetts_exudates <- dom_organism_post_hoc%>%
   group_by(Timepoint, DayNight, feature_number)%>%
   mutate(sum = sum(asin))%>%
@@ -637,11 +673,11 @@ org_dunnetts_exudates <- dom_organism_post_hoc%>%
   mutate(Organism = fct_relevel(Organism, organism_order))%>%
   group_by(Timepoint, feature_number, DayNight)%>%
   nest()%>%
-  mutate(anova = map(data, ~ aov(asin ~ Organism, .x)),
-         dunnett = map(anova, ~ glht(.x, linfct = mcp(Organism = "Dunnett"))),
-         dunnett_summary = map(dunnett, ~summary(.x)%>%
+  mutate(anova = future_map(data, ~ aov(asin ~ Organism, .x)), #switched out map with future_map
+         dunnett = future_map(anova, ~ glht(.x, linfct = mcp(Organism = "Dunnett"))), #switched out map with future_map
+         dunnett_summary = future_map(dunnett, ~summary(.x)%>% #switched out map with future_map
                                  tidy()),
-         tukey = map(anova, ~ TukeyHSD(.x, p.adjust.methods = "BH")))
+         tukey = future_map(anova, ~ TukeyHSD(.x, p.adjust.methods = "BH"))) #switched out map with future_map
 
 
 
