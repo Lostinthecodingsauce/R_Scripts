@@ -27,7 +27,9 @@ install.packages(c("tidyverse",
                    "ggfortify",
                    "ggmap",
                    "dunn.test",
-                   "CHNOSZ"))
+                   "CHNOSZ",
+                   "furrr",
+                   "future"))
 
 library(devtools)
 install_github('fawda123/ggord')

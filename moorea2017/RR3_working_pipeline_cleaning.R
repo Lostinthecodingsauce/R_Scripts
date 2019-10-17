@@ -22,25 +22,25 @@ library(RColorBrewer)
 # LOADING -- dataframes ---------------------------------------------------------
 # True hits and analog hits are exported CSVs from GNPS
 # True hits are more strictly matched to the library
-true_hits <- read_tsv("Library-hits.tsv")%>%
+true_hits <- read_tsv("~/Documents/SDSU/Moorea_2017/190312_new_fusion/Library-hits.tsv")%>%
   rename("feature_number" = '#Scan#')
 
-analog_hits <- read_tsv("Analog-hits.tsv")%>%
+analog_hits <- read_tsv("~/Documents/SDSU/Moorea_2017/190312_new_fusion/Analog-hits.tsv")%>%
   rename("feature_number" = '#Scan#')
 
 # Node info includes networking information about each feature
-node_info <- read_tsv("Node_info.tsv")%>%
+node_info <- read_tsv("~/Documents/SDSU/Moorea_2017/190312_new_fusion/Node_info.tsv")%>%
   rename('feature_number' = 'cluster index',
          'network' = 'componentindex')
 
 # Canopus tries to classify each feature
-canopus_anotations <- read_csv("SIRIUS_etc/converted/Canopus_classes.csv")
+canopus_anotations <- read_csv("~/Documents/SDSU/Moorea_2017/190312_new_fusion/SIRIUS_etc/converted/Canopus_classes.csv")
 
-chemont_anotations <- read_csv("categories.canopus.strings.nelsonMarch2019.CSV")%>%
+chemont_anotations <- read_csv("~/Documents/SDSU/Moorea_2017/190312_new_fusion/categories.canopus.strings.nelsonMarch2019.CSV")%>%
   rename('canopus_annotation' = 'name')
 
 # Sirius and Zodiac both try to assign molecular formulas to all the features
-sirius_zodiac_anotations <- read_csv("SIRIUS_etc/converted/SIRIUS_Zodiac_converted.csv")%>%
+sirius_zodiac_anotations <- read_csv("~/Documents/SDSU/Moorea_2017/190312_new_fusion/SIRIUS_etc/converted/SIRIUS_Zodiac_converted.csv")%>%
   rename(feature_number = 1)%>%
   dplyr::select(-c(14:ncol(.)))
 
@@ -48,10 +48,10 @@ sirius_zodiac_anotations <- read_csv("SIRIUS_etc/converted/SIRIUS_Zodiac_convert
 # Feature table has all features found within the experiments and blanks
 # The columns need to be changed to the actual experiment sample codes
 # Feature_table_raw is the raw export from MZMine
-feature_table_raw <- read_csv("Morrea_Feayures-Table_all_Gap-Filled5.csv")%>%
+feature_table_raw <- read_csv("~/Documents/SDSU/Moorea_2017/190312_new_fusion/Morrea_Feayures-Table_all_Gap-Filled5.csv")%>%
   rename('feature_number' = 'row ID')
 
-ms_sample_codes <- read_csv("Mo'orea 2017 Mass spec sample codes - Sheet1.csv")%>%
+ms_sample_codes <- read_csv("~/Documents/SDSU/Moorea_2017/190312_new_fusion/Mo'orea 2017 Mass spec sample codes - Sheet1.csv")%>%
   rename('run_code' = 'Sample ID',
          'sample_code' = 'Sample Name')
 
@@ -309,25 +309,27 @@ sum_table <-
   filter(!sample_name %like any% c("%C18%", "%XAD%"))
 # RELATIVIZATION AND NORMALIZATION -- RA_asin ->Not grouped by ambient or exudate -----------------
 feature_table_TIC <- ambient_exudate_no_back_trans%>%
-  dplyr::select(-c(exudate_diel, exudate_behavior))%>%
+  dplyr::select(-c(exudate_diel, exudate_behavior))%>%  #If nesting do no remove exudate behavior
   # group_by(exudate_behavior)%>%
   # nest()%>%
   # mutate(data = map(data, ~ 
-  gather(sample_name, peak_area, 2:ncol(.))%>%
+  gather(., sample_name, peak_area, 2:ncol(.))%>%
   spread(feature_number, peak_area)%>%
   add_column(TIC = apply(.[2:ncol(.)], 1, sum), .before = 2)
 
 feature_table_relnorm <- feature_table_TIC%>%
-         # transformations = map(data, ~ 
-  gather(feature_number, xic, 3:(ncol(.)))%>%
-  mutate(RA = .$xic/.$TIC)%>%
-  mutate(asin = asin(sqrt(RA)))%>%
-  dplyr::select(-TIC)%>%
-  gather(transformation, values, xic:asin)%>%
-  arrange(transformation)%>%
-  unite(sample_transformed, c("sample_name", "transformation"), sep = "_")%>%
-  spread(sample_transformed, values)%>%
-  right_join(ambient_exudate_no_back_trans[1:3], ., by = "feature_number")
+  # mutate(transformations = map(data, ~ 
+                                 gather(., feature_number, xic, 3:(ncol(.)))%>%
+                          mutate(RA = .$xic/.$TIC)%>%
+                          mutate(asin = asin(sqrt(RA)))%>%
+                          dplyr::select(-TIC)%>%
+                          gather(transformation, values, xic:asin)%>%
+                          arrange(transformation)%>%
+                          unite(sample_transformed, c("sample_name", "transformation"), sep = "_")%>%
+                          spread(sample_transformed, values)%>%
+  # dplyr::select(-data)%>%
+  # unnest(transformations)%>%
+  right_join(ambient_exudate_no_back_trans[1:3], ., by = "feature_number") ## If nesting change 3 -> 2
 
 # PRE-CLEANING -- Build feature table working data frame ----------------------------------
 # All three joined together (Peak area, RA, asin(sqrt))
@@ -654,10 +656,9 @@ dev.off()
 # WRITING -- feature_table_post_stats------------------------------------------------
 feature_table_post_stats <- left_join(exudate_table_wdf, dunnets_pvalues, by = "feature_number")
 
-write_csv(feature_table_post_stats, 
-          "~/Documents/SDSU/Moorea_2017/RR3/10022019_exudate_ambient/RR3_feature_table_post_stats.csv")
+write_csv(feature_table_post_stats, "RR3_feature_table_post_stats.csv")
 
-write_csv(sum_table, "~/Documents/SDSU/Moorea_2017/RR3/10022019_exudate_ambient/RR3_summary_table.csv")
+write_csv(sum_table, "RR3_summary_table.csv")
 # VISUALIZATIONS -- XIC values ambient vs exudates ------------------------
 rr3_xic <- left_join(exudates_column, feature_table_no_back_trans, by = "feature_number")%>%
   dplyr::select(-c(3:10, 53))%>%

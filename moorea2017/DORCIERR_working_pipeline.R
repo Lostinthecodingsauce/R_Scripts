@@ -12,6 +12,8 @@ library(broom)
 library(readxl)
 library(multcomp)
 library(CHNOSZ)
+library(furrr)
+library(future)
 
 #PCoA, PERMANOVA
 library(vegan)
@@ -19,9 +21,18 @@ library(ape)
 library(wesanderson)
 library(RColorBrewer)
 
+
+# CORES -- setting processors available -----------------------------------
+##Only used if future_mapping
+# num_cores <- availableCores() -6
+# don't murder your compututer and save your self a core
+# this is the parellel planning step (changes global env so this is plan for all parellel 
+# work unless specificed otherwise)
+# plan(multiprocess, workers = num_cores) #defaults to sequential process, multiprocess is one option for parellel 
+
 # LOADING -- dataframes  ------------------------------------------------------
 ## FCM and fDOM data
-dorc_fcm_fdom <- read_xlsx("DORCIERR_fDOM_FCM.xlsx")%>%
+dorc_fcm_fdom <- read_xlsx("~/Documents/SDSU/DORCIERR/Datasets/DORCIERR_fDOM_FCM.xlsx")%>%
   rename(sample_name =`Sample Name of DORCIERR_FCM_Final`)%>%
   rename('DayNight' = 'Experiment')%>%
   rename(Organism = 'Organsim')%>%
@@ -31,32 +42,32 @@ dorc_fcm_fdom <- read_xlsx("DORCIERR_fDOM_FCM.xlsx")%>%
                               TRUE ~ as.character(Organism)))
 
 #DOC data
-moorea_doc <- read_xlsx("MO17_ExpSummary_DOC.2018.04.04.xlsx")%>%
+moorea_doc <- read_xlsx("~/Documents/SDSU/DORCIERR/Datasets/MO17_ExpSummary_DOC.2018.04.04.xlsx")%>%
   dplyr::select(1:2)%>%
   rename(sample_name = 1)%>%
   rename(DOC = 2)
 
 # True hits and analog hits are exported CSVs from GNPS
 # True hits are more strictly matched to the library
-true_hits <- read_tsv("Library-hits.tsv")%>%
+true_hits <- read_tsv("~/Documents/SDSU/Moorea_2017/190312_new_fusion/Library-hits.tsv")%>%
   rename("feature_number" = '#Scan#')
 
-analog_hits <- read_tsv("Analog-hits.tsv")%>%
+analog_hits <- read_tsv("~/Documents/SDSU/Moorea_2017/190312_new_fusion/Analog-hits.tsv")%>%
   rename("feature_number" = '#Scan#')
 
 # Node info includes networking information about each feature
-node_info <- read_tsv("Node_info.tsv")%>%
+node_info <- read_tsv("~/Documents/SDSU/Moorea_2017/190312_new_fusion/Node_info.tsv")%>%
   rename('feature_number' = 'cluster index',
          'network' = 'componentindex')
 
 # Canopus tries to classify each feature
-canopus_anotations <- read_csv("SIRIUS_etc/converted/Canopus_classes.csv")
+canopus_anotations <- read_csv("~/Documents/SDSU/Moorea_2017/190312_new_fusion/SIRIUS_etc/converted/Canopus_classes.csv")
 
-chemont_anotations <- read_csv("categories.canopus.strings.nelsonMarch2019.CSV")%>%
+chemont_anotations <- read_csv("~/Documents/SDSU/Moorea_2017/190312_new_fusion/categories.canopus.strings.nelsonMarch2019.CSV")%>%
   rename('canopus_annotation' = 'name')
 
 # Sirius and Zodiac both try to assign molecular formulas to all the features
-sirius_zodiac_anotations <- read_csv("SIRIUS_etc/converted/SIRIUS_Zodiac_converted.csv")%>%
+sirius_zodiac_anotations <- read_csv("~/Documents/SDSU/Moorea_2017/190312_new_fusion/SIRIUS_etc/converted/SIRIUS_Zodiac_converted.csv")%>%
   rename(feature_number = 1)%>%
   dplyr::select(-c(14:ncol(.)))
 
@@ -64,10 +75,10 @@ sirius_zodiac_anotations <- read_csv("SIRIUS_etc/converted/SIRIUS_Zodiac_convert
 # Feature table has all features found within the experiments and blanks
 # The columns need to be changed to the actual experiment sample codes
 # Feature_table_raw is the raw export from MZMine
-feature_table_raw <- read_csv("Morrea_Feayures-Table_all_Gap-Filled5.csv")%>%
+feature_table_raw <- read_csv("~/Documents/SDSU/Moorea_2017/190312_new_fusion/Morrea_Feayures-Table_all_Gap-Filled5.csv")%>%
   rename('feature_number' = 'row ID')
 
-ms_sample_codes <- read_csv("Mo'orea 2017 Mass spec sample codes - Sheet1.csv")%>%
+ms_sample_codes <- read_csv("~/Documents/SDSU/Moorea_2017/190312_new_fusion/Mo'orea 2017 Mass spec sample codes - Sheet1.csv")%>%
   rename('run_code' = 'Sample ID',
          'sample_code' = 'Sample Name')
 #Networking information for analyzing stats
@@ -249,7 +260,7 @@ feature_table_TIC <- feature_table_no_back_trans%>%
 
 feature_table_relnorm <- feature_table_TIC%>%
   # transformations = map(data, ~ 
-  gather(feature_number, xic, 3:(ncol(.)))%>%
+  gather(.,feature_number, xic, 3:(ncol(.)))%>%
   mutate(RA = .$xic/.$TIC)%>%
   mutate(asin = asin(sqrt(RA)))%>%
   dplyr::select(-TIC)%>%
@@ -257,6 +268,7 @@ feature_table_relnorm <- feature_table_TIC%>%
   arrange(transformation)%>%
   unite(sample_transformed, c("sample_name", "transformation"), sep = "_")%>%
   spread(sample_transformed, values)
+  # unnest(transformations)
 
 
 # DORCIERR feature_table --------------------------------------------------
@@ -627,42 +639,6 @@ organism_order <- as.factor(dom_organism_post_hoc$Organism)%>%
   levels()%>%
   as.vector()
 
-## Notes from the Captain 
-# There a lot of parrelization packages in R the easiest ones to use if you are
-# used to purrr syntax is future + furrr. Future does all the specifications for
-# how to plan a parellel process, furrr is a nice wrapper to use purrr syntax in
-# parellel.
-
-install.packages(c("future", "furrr")) # do this once
-library(furrr) # furrr requuires future and gets imported by default
-num_cores <- availibleCores() - 1 # don't murder your compututer and save your self a core
-# this is the parellel planning step (changes global env so this is plan for all parellel 
-# work unless specificed otherwise)
-plan(multiprocess, workers = num_cores) #defaults to sequential process, multiprocess is one option for parellel 
-
-## Notes from the Captain
-## I commented out your code and wrote mine below
-# org_dunnetts_exudates <- dom_organism_post_hoc%>%
-#   group_by(Timepoint, DayNight, feature_number)%>%
-#   mutate(sum = sum(asin))%>%
-#   filter(!sum == 0)%>%
-#   dplyr::select(-sum)%>%
-#   ungroup()%>%
-#   mutate(Organism = factor(Organism))%>%
-#   mutate(Organism = fct_relevel(Organism, organism_order))%>%
-#   group_by(Timepoint, feature_number, DayNight)%>%
-#   nest()%>%
-#   mutate(anova = map(data, ~ aov(asin ~ Organism, .x)),
-#          dunnett = map(anova, ~ glht(.x, linfct = mcp(Organism = "Dunnett"))),
-#          dunnett_summary = map(dunnett, ~summary(.x)%>%
-#                                  tidy()),
-#          tukey = map(anova, ~ TukeyHSD(.x, p.adjust.methods = "BH")))
-
-
-## Notes from the Captain
-# you might try and reduce the number of map() you use. The costly parts of
-# parellel is the planning and recombining the data IE a couple of
-# computationally heavy tasks is better than 50 simple tasks.
 org_dunnetts_exudates <- dom_organism_post_hoc%>%
   group_by(Timepoint, DayNight, feature_number)%>%
   mutate(sum = sum(asin))%>%
@@ -673,11 +649,30 @@ org_dunnetts_exudates <- dom_organism_post_hoc%>%
   mutate(Organism = fct_relevel(Organism, organism_order))%>%
   group_by(Timepoint, feature_number, DayNight)%>%
   nest()%>%
-  mutate(anova = future_map(data, ~ aov(asin ~ Organism, .x)), #switched out map with future_map
-         dunnett = future_map(anova, ~ glht(.x, linfct = mcp(Organism = "Dunnett"))), #switched out map with future_map
-         dunnett_summary = future_map(dunnett, ~summary(.x)%>% #switched out map with future_map
+  mutate(dunnett = map(data, ~ aov(asin ~ Organism, .x)%>%
+                         glht(linfct = mcp(Organism = "Dunnett"))),
+         dunnett_summary = map(dunnett, ~summary(.x)%>%
                                  tidy()),
-         tukey = future_map(anova, ~ TukeyHSD(.x, p.adjust.methods = "BH"))) #switched out map with future_map
+         tukey = map(data, ~ aov(asin ~ Organism, .x)
+                     glht(linfct = mcp(Tension = "Tukey")))
+
+##Doing future_mapping across processors. Seems to take longer when you have a lot of map functions.
+# org_dunnetts_exudates <- dom_organism_post_hoc%>%
+#   group_by(Timepoint, DayNight, feature_number)%>%
+#   mutate(sum = sum(asin))%>%
+#   filter(!sum == 0)%>%
+#   dplyr::select(-sum)%>%
+#   ungroup()%>%
+#   mutate(Organism = factor(Organism))%>%
+#   mutate(Organism = fct_relevel(Organism, organism_order))%>%
+#   group_by(Timepoint, feature_number, DayNight)%>%
+#   nest()%>%
+#   mutate(dunnett = future_map(data, ~ aov(asin ~ Organism, .x)%>%
+#                                 glht(linfct = mcp(Organism = "Dunnett"))),
+#          dunnett_summary = future_map(dunnett, ~ summary(.x)%>%
+#                                 tidy()),
+#          tukey = future_map(data, ~ aov(asin ~ Organism, .x)%>%
+#                               glht(linfct = mcp(tension = "Tukey")))) #switched out map with future_map
 
 
 
