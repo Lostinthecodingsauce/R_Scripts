@@ -58,6 +58,7 @@ ms_sample_codes <- read_csv("~/Documents/SDSU/Moorea_2017/190312_new_fusion/Mo'o
 # CLEANING -- SIRIUS_Zodiac elemental composition of molecular formulas -------------------------------------------
 networking_elements <- sirius_zodiac_anotations%>%
   filter(!ZodiacMF == "not_explainable")%>%
+  filter(!ZodiacMF < 0.98)%>%
   group_by(feature_number)%>% 
   do(., rownames_to_column(as.data.frame(makeup(.$ZodiacMF, multiplier = 1), var = "element")))%>%
   spread(rowname, 3)
@@ -67,7 +68,7 @@ networking_elements[is.na(networking_elements)] <- 0
 networking_energy <- networking_elements%>%
   dplyr::select(c(1, 'C', 'H', 'N', 'O', 'P', 'S'))%>%
   add_column(NOSC = (-((4*.$C + .$H - 3*.$N - 2*.$O + 5*.$P - 2*.$S)/.$C)+4))%>%
-  add_column(dG = 60.3-28.5*.$NOSC)
+  filter(NOSC >-4 & NOSC < 4)
 
 # CLEANING -- Canopus---------------------------
 
@@ -319,14 +320,14 @@ feature_table_TIC <- ambient_exudate_no_back_trans%>%
 
 feature_table_relnorm <- feature_table_TIC%>%
   # mutate(transformations = map(data, ~ 
-                                 gather(., feature_number, xic, 3:(ncol(.)))%>%
-                          mutate(RA = .$xic/.$TIC)%>%
-                          mutate(asin = asin(sqrt(RA)))%>%
-                          dplyr::select(-TIC)%>%
-                          gather(transformation, values, xic:asin)%>%
-                          arrange(transformation)%>%
-                          unite(sample_transformed, c("sample_name", "transformation"), sep = "_")%>%
-                          spread(sample_transformed, values)%>%
+  gather(., feature_number, xic, 3:(ncol(.)))%>%
+  mutate(RA = .$xic/.$TIC)%>%
+  mutate(asin = asin(sqrt(RA)))%>%
+  dplyr::select(-TIC)%>%
+  gather(transformation, values, xic:asin)%>%
+  arrange(transformation)%>%
+  unite(sample_transformed, c("sample_name", "transformation"), sep = "_")%>%
+  spread(sample_transformed, values)%>%
   # dplyr::select(-data)%>%
   # unnest(transformations)%>%
   right_join(ambient_exudate_no_back_trans[1:3], ., by = "feature_number") ## If nesting change 3 -> 2
@@ -348,7 +349,7 @@ carbon_normalized_ra_NOSC <- exudate_table_wdf_temp%>%
   gather(sample_name, ra, 3:ncol(.))%>%
   mutate(percent_total_C = ra*C)%>%
   group_by(sample_name)%>%
-  mutate(sum_c = sum(percent_total_C))%>%
+  mutate(sum_c = sum(percent_total_C, na.rm = TRUE))%>%
   mutate(carbon_norm_temp = percent_total_C/sum_c)%>%
   ungroup()%>%
   right_join(metadata%>%
@@ -358,7 +359,7 @@ carbon_normalized_ra_NOSC <- exudate_table_wdf_temp%>%
   dplyr::select(c(feature_number, sample_name, carbon_normalized_NOSC))%>%
   mutate(sample_name = gsub("_RA", "_RAC", sample_name))%>%
   spread(sample_name, carbon_normalized_NOSC)
-  
+
 # Percent is XIC * C content of feature 
 carbon_normalized_xic_NOSC <- exudate_table_wdf_temp%>%
   filter(`characterization scores` == "Good")%>%
@@ -366,7 +367,7 @@ carbon_normalized_xic_NOSC <- exudate_table_wdf_temp%>%
   gather(sample_name, xic, 3:ncol(.))%>%
   mutate(percent_total_C = xic*C)%>%
   group_by(sample_name)%>%
-  mutate(sum_c = sum(percent_total_C))%>%
+  mutate(sum_c = sum(percent_total_C,  na.rm = TRUE))%>%
   mutate(carbon_norm_temp = percent_total_C/sum_c)%>%
   ungroup()%>%
   right_join(metadata%>%
@@ -552,8 +553,8 @@ dunnets_pvalues <- rr3_organism_post_hoc%>%
   gather(label, value, 3:ncol(.))%>%
   unite(label_b, c(label, DayNight), sep = "_")%>%
   spread(label_b, value)
-  
-  
+
+
 
 # POST STATS -- Tulkey summary table --------------------------------------
 ## Not yet implimented, however the data has been analyzed
@@ -592,9 +593,9 @@ rr3_pcoa <- rr3_wdf%>%
 
 #Eigen plot
 ylimit = c(0, 1.1*max(rr3_pcoa$values$Relative_eig))
-  
+
 Eigan <- barplot(rr3_pcoa$values$Relative_eig[1:10], ylim= ylimit)
-  
+
 text(x = Eigan, y = rr3_pcoa$values$Relative_eig[1:10], label = rr3_pcoa$values$Relative_eig[1:10], pos = 4, cex = .7, col = "red")
 
 #PCoA plot
@@ -610,7 +611,7 @@ rr3_pcoa_grouped <- rr3_wdf%>%
   split(.$DayNight)%>%
   map(~ dplyr::select(., -c(1:5)))%>%
   map(~ vegdist(., "bray")%>%
-                     pcoa(.))
+        pcoa(.))
 
 pco_night <- rr3_pcoa_grouped$Night$vectors%>%
   as.data.frame()%>%
@@ -651,7 +652,7 @@ all_rr3_pcoa%>%
         xlab("Axis 1") +
         ylab("Axis 2"))
 dev.off()
-  
+
 
 # WRITING -- feature_table_post_stats------------------------------------------------
 feature_table_post_stats <- left_join(exudate_table_wdf, dunnets_pvalues, by = "feature_number")
@@ -660,14 +661,15 @@ write_csv(feature_table_post_stats, "RR3_feature_table_post_stats.csv")
 
 write_csv(sum_table, "RR3_summary_table.csv")
 # VISUALIZATIONS -- XIC values ambient vs exudates ------------------------
-rr3_xic <- left_join(exudates_column, feature_table_no_back_trans, by = "feature_number")%>%
-  dplyr::select(-c(3:10, 53))%>%
-  gather(sample_ID, XIC, 3:ncol(.))
+rr3_xic <- exudate_table_wdf%>%
+  dplyr::select(c(1:3, level_3, ends_with("_xic")))%>%
+  gather(sample_ID, XIC, 5:ncol(.))
 
 rr3_xic_wdf <- rr3_xic%>%
   separate(sample_ID, c("Experiment", "Organism", "Replicate", "Timepoint"), sep = "_")%>%
   filter(!Experiment %like% "%Blank%",
          !Organism %like% "%Blank")%>%
+  separate(Timepoint, c("Timepoint", "DayNight"), sep = 2)%>%
   dplyr::mutate(Experiment = case_when(Experiment == "D" ~ "dorcierr",
                                        Experiment == "M" ~ "mordor",
                                        Experiment == "R" ~ "RR3",
@@ -677,16 +679,77 @@ rr3_xic_wdf <- rr3_xic%>%
                                      Organism == "PL" ~ "Porites lobata",
                                      Organism == "PV" ~ "Pocillopora verrucosa",
                                      Organism == "TR" ~ "Turf",
+                                     Organism == "WA" & Timepoint == "T0" ~ "T0",
                                      Organism == "WA" ~ "Water control",
-                                     TRUE ~ as.character(Organism)))%>%
+                                     TRUE ~ as.character(Organism)))
+
+rr3_ra <- exudate_table_wdf%>%
+  dplyr::select(c(1:3, ends_with("_rac")))%>%
+  gather(sample_ID, ra, 4:ncol(.))
+
+rr3_ra_wdf <- rr3_ra%>%
+  separate(sample_ID, c("Experiment", "Organism", "Replicate", "Timepoint"), sep = "_")%>%
+  filter(!Experiment %like% "%Blank%",
+         !Organism %like% "%Blank")%>%
   separate(Timepoint, c("Timepoint", "DayNight"), sep = 2)%>%
-  filter(Timepoint == "TF")
+  dplyr::mutate(Experiment = case_when(Experiment == "D" ~ "dorcierr",
+                                       Experiment == "M" ~ "mordor",
+                                       Experiment == "R" ~ "RR3",
+                                       TRUE ~ as.character(Experiment)))%>%
+  dplyr::mutate(Organism = case_when(Organism == "CC" ~ "CCA",
+                                     Organism == "DT" ~ "Dictyota",
+                                     Organism == "PL" ~ "Porites lobata",
+                                     Organism == "PV" ~ "Pocillopora verrucosa",
+                                     Organism == "TR" ~ "Turf",
+                                     Organism == "WA" & Timepoint == "T0" ~ "T0",
+                                     Organism == "WA" ~ "Water control",
+                                     TRUE ~ as.character(Organism)))
+
+rr3_exudates_ra <- read_csv("~/Documents/SDSU/Moorea_2017/RR3/Grouped_exudate_behavior/EXUDATE_RR3_feature_table_master_post_filtered.csv")%>%
+  dplyr::select(c(1:3, ends_with("_rac")))%>%
+  gather(sample_ID, ra, 4:ncol(.))%>%
+  separate(sample_ID, c("Experiment", "Organism", "Replicate", "Timepoint"), sep = "_")%>%
+  filter(!Experiment %like% "%Blank%",
+         !Organism %like% "%Blank")%>%
+  separate(Timepoint, c("Timepoint", "DayNight"), sep = 2)%>%
+  dplyr::mutate(Experiment = case_when(Experiment == "D" ~ "dorcierr",
+                                       Experiment == "M" ~ "mordor",
+                                       Experiment == "R" ~ "RR3",
+                                       TRUE ~ as.character(Experiment)))%>%
+  dplyr::mutate(Organism = case_when(Organism == "CC" ~ "CCA",
+                                     Organism == "DT" ~ "Dictyota",
+                                     Organism == "PL" ~ "Porites lobata",
+                                     Organism == "PV" ~ "Pocillopora verrucosa",
+                                     Organism == "TR" ~ "Turf",
+                                     Organism == "WA" & Timepoint == "T0" ~ "T0",
+                                     Organism == "WA" ~ "Water control",
+                                     TRUE ~ as.character(Organism)))
+
+rr3_xic_wdf%>%
+  split(.$exudate_behavior)%>%
+  map(~ ggplot(., aes(x = Organism, y = log10(XIC)))+
+        geom_bar(aes(fill= canopus_annotation),
+                 stat = "sum", position = "stack", na.rm = TRUE) +
+        theme(
+          panel.background = element_rect(fill = "transparent"), # bg of the panel
+          plot.background = element_rect(fill = "transparent", color = NA), # bg of the plot
+          panel.grid.major.y = element_line(size = 0.2, linetype = 'solid',colour = "gray"), # get rid of major grid
+          # panel.grid.minor.x = element_line(size = 0.5, linetype = 'solid',colour = "black"), # get rid of minor grid
+          legend.background = element_rect(fill = "transparent"), # get rid of legend bg
+          legend.box.background = element_rect(fill = "transparent"), # get rid of legend panel bg
+          axis.text.x = element_text(angle = 75, hjust = 1,face = "italic"),
+          axis.title = element_text(face = "italic"),
+          strip.text = element_text(face = "italic")
+        ) +
+        facet_wrap(~DayNight) +
+        xlab("Organism") +
+        ylab("log10(XIC)") +
+        ggtitle(str_c("XIC values ", .$exudate_behavior)))
 
 
-
-ggplot(rr3_xic_wdf, aes(x = Organism, y = log10(XIC)))+
-  geom_bar(aes(fill= max),
-               stat = "sum", position = "stack") +
+ggplot(rr3_ra_wdf, aes(x = Organism, y = ra))+
+  geom_bar(aes(fill= reorder(exudate_behavior, ra)),
+           stat = "summary", fun.y = "mean", position = "stack", na.rm = TRUE) +
   theme(
     panel.background = element_rect(fill = "transparent"), # bg of the panel
     plot.background = element_rect(fill = "transparent", color = NA), # bg of the plot
@@ -698,7 +761,29 @@ ggplot(rr3_xic_wdf, aes(x = Organism, y = log10(XIC)))+
     axis.title = element_text(face = "italic"),
     strip.text = element_text(face = "italic")
   ) +
+  facet_wrap(~DayNight) +
   xlab("Organism") +
-  ylab("log10(XIC)")
+  ylab("ra")+
+  ggtitle("RA_ungrouped")
 
+rr3_exudates_ra%>%
+  split(.$exudate_behavior)%>%
+  map(~ ggplot(., aes(x = Organism, y = log10(ra)))+
+        geom_boxplot(stat = "boxplot",  na.rm = TRUE, outlier.shape=NA) +
+        # scale_y_continuous(limits = c(-0.001, 0.001))+
+        theme(
+          panel.background = element_rect(fill = "transparent"), # bg of the panel
+          plot.background = element_rect(fill = "transparent", color = NA), # bg of the plot
+          panel.grid.major.y = element_line(size = 0.2, linetype = 'solid',colour = "gray"), # get rid of major grid
+          # panel.grid.minor.x = element_line(size = 0.5, linetype = 'solid',colour = "black"), # get rid of minor grid
+          legend.background = element_rect(fill = "transparent"), # get rid of legend bg
+          legend.box.background = element_rect(fill = "transparent"), # get rid of legend panel bg
+          axis.text.x = element_text(angle = 75, hjust = 1,face = "italic"),
+          axis.title = element_text(face = "italic"),
+          strip.text = element_text(face = "italic")
+        ) +
+        facet_wrap(~DayNight) +
+        xlab("Organism") +
+        ylab("ra")+
+        ggtitle("RA_GROUPED"))
 

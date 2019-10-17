@@ -48,29 +48,23 @@ twoway_scoring_aov <- summary(aov(percent.asin ~ CCA_species*Coral_species, data
 cca_species_vector <- as.vector(c("Hydrolithon borgesenii", "Paragoniolithon solubile", "Porolithon pachydernum"))
 
 dunnett_model_scoring <- tidy_scoring%>%
-  split(list(.$Coral_species, .$metabolite_pool), sep = "_")%>%
-  map(~summary(glht(aov(percent.asin ~ CCA_species, .),
-                    linfct = mcp(CCA_species = "Dunnett"))))
-
-coral_labels <- as.vector(names(dunnett_model_scoring))
-
-dunnett_pvalues <- as.data.frame(dunnett_model_scoring%>%
-                                  map(~list(.$test$pvalues)),
-                                row.names = cca_species_vector)
-
-colnames(dunnett_pvalues) <- coral_labels
-
-scoring_dunnett_pvalues <- dunnett_pvalues%>%
-  rownames_to_column(var = "cca_species")%>%
-  gather(spec_metab, p_value, 2:7)%>% 
-  separate(spec_metab, c("coral_species", "metabolites_pool"), sep = "_")
+  group_by(Coral_species, metabolite_pool)%>%
+  nest()%>%
+  mutate(dunnett = map(data, ~ aov(percent.asin ~ CCA_species, .x)%>%
+                    glht(linfct = mcp(CCA_species = "Dunnett"))),
+      dunnett_summary = map(dunnett, ~ summary(.x)%>%
+                              tidy()))%>%
+  dplyr::select(-c(data, dunnett))%>%
+  unnest(dunnett_summary)%>%
+  dplyr::select(-c(4:7))%>%
+  mutate(lhs = gsub(" - Water control", "", lhs))
 
 # GRAPHING -- Scoring Bar Charts ------------------------------------------
-no_dlab <- tidy_scoring%>%
-  filter(!Coral_species == "Diploria labyrinthiformis")
+no_pachy <- tidy_scoring%>%
+  filter(!CCA_species == "Porolithon pachydernum")
 
 pdf("perent_settlement.pdf", height = 5, width = 8)
-ggplot(tidy_scoring, aes(x = CCA_species, y = percent))+
+ggplot(no_pachy, aes(x = CCA_species, y = percent))+
   geom_boxplot(aes(fill= metabolite_pool),
                stat = "boxplot", position = "dodge2") +
   geom_point(position=position_dodge(width=0.75), aes(group=metabolite_pool))+
@@ -85,11 +79,11 @@ ggplot(tidy_scoring, aes(x = CCA_species, y = percent))+
     axis.title = element_text(face = "italic"),
     strip.text = element_text(face = "italic")
   ) +
-  facet_wrap(~ Coral_species, nrow = 1) +
+  facet_wrap(~ reorder(Coral_species, percent), nrow = 1) +
   xlab("CCA species") +
   ylab("Percent Settled")
 dev.off()
 
 
 # WRITING -- stats_dataframes ---------------------------------------------
-write_csv(scoring_dunnett_pvalues, "settlement_dunnet_pvalues.csv")
+write_csv(dunnett_model_scoring, "settlement_dunnet_pvalues.csv")
