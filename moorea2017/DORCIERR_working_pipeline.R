@@ -87,6 +87,11 @@ network_id <- feature_metadata%>%
                 'canopus_annotation', 'level', 'canopus_probability', 'CLASS_STRING')
 network_id$feature_number <- as.character(network_id$feature_number)
 
+#16s rRNA sequences
+microbe_abundance_raw <- read_tsv("~/Documents/SDSU/DORCIERR/Datasets/microbes/MCR2017.16S.Nelson.Pipeline.October2019/abundance_table_100.shared.tsv")
+microbe_taxonomy <- read_tsv("~/Documents/SDSU/DORCIERR/Datasets/microbes/MCR2017.16S.Nelson.Pipeline.October2019/annotations_100.taxonomy.tsv")
+
+
 # CLEANING -- SIRIUS_Zodiac elemental composition of molecular formulas -------------------------------------------
 networking_elements <- sirius_zodiac_anotations%>%
   filter(!ZodiacMF == "not_explainable")%>%
@@ -321,7 +326,7 @@ dorcierr_features_wdf <- left_join(dorcierr_table_wdf_temp, carbon_normalized_NO
 
 write_csv(dorcierr_features_wdf, "Dorcierr_feature_table_master_post_filtered.csv")
 
-# PRE-CLEANING -- Making Mo’orea working data frame for stats -----------------------------
+# PRE-CLEANING -- Making Dorcierr working data frame for stats -----------------------------
 dorc_transposed <- dorcierr_features_wdf%>%
   dplyr::select(c(feature_number, ends_with("_asin")))%>%
   gather(sample_ID, angular, 2:ncol(.))%>%
@@ -347,8 +352,7 @@ blanks_wdf <- dorc_transposed%>%
 dorc_wdf <- dorc_transposed%>%
   separate(sample_ID, c("Experiment", "Organism", "Replicate", "Timepoint"), sep = "_")%>%
   filter(!Experiment %like% "%Blank%",
-         !Organism %like% "%Blank",
-         !Timepoint == "T0")%>%
+         !Organism %like% "%Blank")%>%
   dplyr::mutate(Experiment = case_when(Experiment == "D" ~ "dorcierr",
                                        Experiment == "M" ~ "mordor",
                                        Experiment == "R" ~ "RR3",
@@ -535,6 +539,72 @@ dom_stats_wdf<- dorc_wdf%>%
   filter(!Organism == "Influent",
          !Organism == "Offshore")%>%
   gather(feature_number, asin, 6:ncol(.))
+
+# PRE-STATS CLEANING -- 16s -----------------------------------------------
+microbe_combined <- microbe_abundance_raw%>%
+  select(-1)%>%
+  mutate(Group = case_when(Group == "Dorcierr_D_DT_1_TFD" ~ "D_DT_1_TFD",
+                           Group == "DORCIERR_D_WA_2_TFN" ~ "D_WA_2_TFN",
+                           TRUE ~ as.character(Group)))%>%
+  filter(Group %like% "%D_%")%>%
+  rename(sample_code = Group)%>%
+  gather(OTU, reads, 3:ncol(.))%>%
+  left_join(., microbe_taxonomy, by = "OTU")%>%
+  select(-Size)%>%
+  separate(Taxonomy, c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "OTU"), sep = ";")%>%
+  mutate(Class = case_when(Class %like any% c("%uncultured%", "%unclassified%", "%unidentified%") ~ "unclassified",
+                                  TRUE ~ as.character(Class)),
+         Order = case_when(Class == "unclassified" ~ "",
+                                  TRUE ~ as.character(Order)),
+         Family = case_when(Class == "unclassified" ~ "",
+                            TRUE ~ as.character(Family)),
+         Genus = case_when(Class == "unclassified" ~ "",
+                           TRUE ~ as.character(Genus)),
+         OTU = case_when(Class == "unclassified" ~ "",
+                         TRUE ~ as.character(OTU)),
+         Order = case_when(Order %like any% c("%uncultured%", "%unclassified%", "%unidentified%") ~ "unclassified",
+                           TRUE ~ as.character(Order)),
+         Family = case_when(Order == "unclassified" ~ "",
+                            TRUE ~ as.character(Family)),
+         Genus = case_when(Order == "unclassified" ~ "",
+                           TRUE ~ as.character(Genus)),
+         OTU = case_when(Order == "unclassified" ~ "",
+                         TRUE ~ as.character(OTU)),
+         Family = case_when(Family %like any% c("%uncultured%", "%unclassified%", "%unidentified%") ~ "unclassified",
+                            TRUE ~ as.character(Family)),
+         Genus = case_when(Family == "unclassified" ~ "",
+                           TRUE ~ as.character(Genus)),
+         OTU = case_when(Family == "unclassified" ~ "",
+                         TRUE ~ as.character(OTU)),
+         Genus = case_when(Genus %like any% c("%uncultured%", "%unclassified%", "%unidentified%") ~ "unclassified",
+                           TRUE ~ as.character(Genus)),
+         OTU = case_when(Genus == "unclassified" ~ "",
+                         OTU %like any% c("%uncultured%", "%unclassified%", "%unidentified%") ~ "sp",
+                         TRUE ~ as.character(OTU)))%>%
+  separate(sample_code, c("Experiment", "Organism", "Replicate", "Timepoint"), sep = "_", remove = FALSE)%>%
+  dplyr::mutate(Experiment = case_when(Experiment == "D" ~ "dorcierr",
+                                       Experiment == "M" ~ "mordor",
+                                       Experiment == "R" ~ "RR3",
+                                       TRUE ~ as.character(Experiment)))%>%
+  dplyr::mutate(Organism = case_when(Organism == "CC" ~ "CCA",
+                                     Organism == "DT" ~ "Dictyota",
+                                     Organism == "PL" ~ "Porites lobata",
+                                     Organism == "PV" ~ "Pocillopora verrucosa",
+                                     Organism == "TR" ~ "Turf",
+                                     Organism == "WA" ~ "Water control",
+                                     Organism == "IN" ~ "Influent",
+                                     Organism == "OF" ~ "Offshore",
+                                     TRUE ~ as.character(Organism)))%>%
+  separate(Timepoint, c("Timepoint", "DayNight"), sep = 2)%>%
+  mutate(DayNight = case_when(DayNight == "D" ~ "Day",
+                              TRUE ~ "Night"))%>%
+  group_by(sample_code)%>%
+  mutate(sum = sum(reads),
+         ra = reads/sum,
+         asin = asin(sqrt(ra)))%>%
+  ungroup()
+
+
 # SET SEED ----------------------------------------------------------------
 set.seed(2005)
 
