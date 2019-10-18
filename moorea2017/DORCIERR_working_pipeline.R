@@ -585,6 +585,11 @@ microbe_combined <- microbe_abundance_raw%>%
          OTU = case_when(Genus == "unclassified" ~ "",
                          OTU %like any% c("%uncultured%", "%unclassified%", "%unidentified%") ~ "sp",
                          TRUE ~ as.character(OTU)))%>%
+  unite(Taxonomy, c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "OTU"), sep = ";")%>%
+  group_by(sample_code, Taxonomy)%>%
+  summarize_if(is.numeric, sum)%>%
+  ungroup()%>%
+  separate(Taxonomy, c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "OTU"), sep = ";")%>%
   separate(sample_code, c("Experiment", "Organism", "Replicate", "Timepoint"), sep = "_", remove = FALSE)%>%
   dplyr::mutate(Experiment = case_when(Experiment == "D" ~ "dorcierr",
                                        Experiment == "M" ~ "mordor",
@@ -599,7 +604,7 @@ microbe_combined <- microbe_abundance_raw%>%
                                      Organism == "IN" ~ "Influent",
                                      Organism == "OF" ~ "Offshore",
                                      TRUE ~ as.character(Organism)))%>%
-  unite(OFGO, c("Order", "Family", "Genus", "OTU"), sep = ";")%>%
+  unite(OFGO, c("Order", "Family", "Genus", "OTU"), sep = ";", remove = FALSE)%>%
   separate(Timepoint, c("Timepoint", "DayNight"), sep = 2)%>%
   mutate(DayNight = case_when(DayNight == "D" ~ "Day",
                               TRUE ~ "Night"))%>%
