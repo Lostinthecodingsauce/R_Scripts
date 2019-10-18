@@ -1,6 +1,6 @@
 ## Script Written by Zach Quinlan 06/19/19
 # Re-organization of DORCIERR_FCM_fDOM.R because it needs to be cleaner 07/15/2019
-#  Only working on daytime exudation and remineralization
+# Only working on daytime exudation and remineralization
 # Rewritten with changes to RR3 starting pipeline 10/11/2019
 
 # LOADING -- packages -------------------------------------------------------
@@ -545,6 +545,10 @@ microbe_combined <- microbe_abundance_raw%>%
   select(-1)%>%
   mutate(Group = case_when(Group == "Dorcierr_D_DT_1_TFD" ~ "D_DT_1_TFD",
                            Group == "DORCIERR_D_WA_2_TFN" ~ "D_WA_2_TFN",
+                           Group == "D_PV_2_TFN_SA504_SC704" ~ "D_PV_2_TFN",
+                           Group == "D_PV_2_TFN_SA503_SC704" ~ "D_PV_3_TFN",
+                           Group == "D_WA_4_TFN_SA503_SC703" ~ "D_WA_4_TFN",
+                           Group == "D_WA_4_TFN_SA504_SC703" ~ "D_WA_2_TFN",
                            TRUE ~ as.character(Group)))%>%
   filter(Group %like% "%D_%")%>%
   rename(sample_code = Group)%>%
@@ -595,9 +599,12 @@ microbe_combined <- microbe_abundance_raw%>%
                                      Organism == "IN" ~ "Influent",
                                      Organism == "OF" ~ "Offshore",
                                      TRUE ~ as.character(Organism)))%>%
+  unite(OFGO, c("Order", "Family", "Genus", "OTU"), sep = ";")%>%
   separate(Timepoint, c("Timepoint", "DayNight"), sep = 2)%>%
   mutate(DayNight = case_when(DayNight == "D" ~ "Day",
                               TRUE ~ "Night"))%>%
+  filter(Organism != "Offshore",
+         Organism != "Influent")%>%
   group_by(sample_code)%>%
   mutate(sum = sum(reads),
          ra = reads/sum,
@@ -644,6 +651,29 @@ aov_fcm <-sapply(fcm_stats_df[c(4,6)], function(x) summary(
   mutate(FDR = p.adjust(.$f_value, method = "BH"))
 
 
+
+# STATS ANOVA -- Microbe TWO-Way ------------------------------------------
+aov_microbe <- microbe_combined%>%
+  filter(Timepoint == "TF")%>%
+  group_by(OFGO)%>%
+  nest()%>%
+  mutate(anova = map(data, ~ aov(asin ~ Organism*DayNight, .x)%>%
+                       tidy()%>%
+                       filter(!term == "Residuals")%>%
+                       dplyr::select(term, p.value)))%>%
+  select(-data)%>%
+  unnest(anova)
+
+anova_microbe_pvalues <- aov_microbe%>%
+  mutate(FDR = p.adjust(p.value, method = "BH"))%>%
+  filter(FDR < 0.05)
+
+organism_significant_microbes <- as.vector(anova_microbe_pvalues%>%
+                                             filter(term == "Organism"))$OFGO
+
+DayNight_significant_microbes <- as.vector(anova_microbe_pvalues%>%
+                                             filter(term != "Organism"))$OFGO
+
 # PRE-POST-HOC CLEANING -- Organism dunnetts ------------------------------------------------------
 ## Making Post-Hoc dataframes filtering for significant p_values from Two-Way Anova
 dom_organism_post_hoc <- dom_stats_wdf%>%
@@ -660,6 +690,16 @@ dom_timepoint <- dom_timepoint_post_hoc%>%
   dplyr::select(-sum)%>%
   ungroup()
 
+
+
+# PRE-POST-HOC CLEANING -- Microbe Dunnetts and DayNight anova -------------------------------
+mic_organism_post_hoc <- microbe_combined%>%
+  filter(OFGO %in% organism_significant_microbes)%>%
+  filter(Timepoint == "TF")
+
+daynight_microbe_post_hoc <- microbe_combined%>%
+  filter(OFGO %in% DayNight_significant_microbes)%>%
+  filter(Timepoint == "TF")
 
 # STATS POST-HOC -- FCM Tukeys ----------------------------------------------------------
 # Tukey growth rates for the first half of the expierment
@@ -724,7 +764,7 @@ org_dunnetts_exudates <- dom_organism_post_hoc%>%
          dunnett_summary = map(dunnett, ~summary(.x)%>%
                                  tidy()),
          tukey = map(data, ~ aov(asin ~ Organism, .x)
-                     glht(linfct = mcp(Tension = "Tukey")))
+                     glht(linfct = mcp(Tension = "Tukey"))))
 
 ##Doing future_mapping across processors. Seems to take longer when you have a lot of map functions.
 # org_dunnetts_exudates <- dom_organism_post_hoc%>%
@@ -760,6 +800,47 @@ significant_exudates <- dunnets_pvals%>%
 
 significant_accumulites <- dunnets_pvals%>%
   filter(Timepoint == "TF")
+
+# STATS POST-HOC -- Day and Night Dunnetts TF -----------------------------
+organism_order_micro <- as.factor(mic_organism_post_hoc$Organism)%>%
+  relevel("Water control")%>%
+  levels()%>%
+  as.vector()
+
+dunnett_microbe_pvals <- mic_organism_post_hoc%>%
+  group_by(DayNight, OFGO)%>%
+  mutate(sum = sum(asin))%>%
+  filter(sum != 0)%>%
+  select(-sum)%>%
+  mutate(Organism = factor(Organism))%>%
+  mutate(Organism = fct_relevel(Organism, organism_order_micro))%>%
+  nest()%>%
+  mutate(dunnett = map(data, ~ aov(asin ~ Organism, .x)%>%
+                         glht(linfct = mcp(Organism = "Dunnett"))),
+         dunnett_summary = map(dunnett, ~summary(.x)%>%
+                                 tidy()))%>%
+  select(-c(data,dunnett))%>%
+  unnest(dunnett_summary)%>%
+  select(-c(4:7))%>%
+  mutate(lhs = gsub(" - Water control", "", lhs))%>%
+  rename("Organism" = "lhs")%>%
+  mutate(FDR = p.adjust(p.value, method = "BH"))%>%
+  filter(FDR < 0.05)
+
+# STATS POST-HOC -- DayNight anova grouped by organism --------------------
+daynight_microbe_pvals <- mic_organism_post_hoc%>%
+  group_by(Organism, OFGO)%>%
+  mutate(sum = sum(asin))%>%
+  filter(sum != 0)%>%
+  select(-sum)%>%
+  nest()%>%
+  mutate(data = map(data, ~ aov(asin ~ DayNight, .x)%>%
+                       tidy()))%>%
+  unnest(data)%>%
+  select(-c(4:7))%>%
+  filter(term != "Residuals")%>%
+  mutate(FDR = p.adjust(p.value, method = "BH"))%>%
+  filter(FDR < 0.05)
 
 # META-STATS -- labile compounds --------------------------------------------------------
 ## These are defined as features which are present in T0 for any organism and then decrease from T0 -> TF
@@ -952,6 +1033,70 @@ combined_accumulite_compounds <- right_join(networking, accumulating_exudates, b
 # META-STATS —- Labile + Accumulating compounds ------------------------------
 combined_labile_accumulites_compounds <- bind_rows(combined_accumulite_compounds,combined_labile_compounds)%>%
   dplyr::select(feature_number, exudate_type, lability, everything())
+
+# META-STATS -- microbes --------------------------------------------------
+dunnett_micro_analysis <- dunnett_microbe_pvals%>%
+  select(-p.value)%>%
+  spread(Organism, FDR)%>%
+  add_column(number_exudate_organisms = rowSums(.[3:ncol(.)] >= 0, na.rm = TRUE))%>%
+  mutate(microbe_organism = case_when(is.na(CCA) == FALSE & 
+                                    is.na(Dictyota) &
+                                    is.na(Turf) &
+                                    is.na(`Pocillopora verrucosa`)  &
+                                    is.na(`Porites lobata`) ~ "CCA",
+                                  is.na(CCA)  & 
+                                    is.na(Dictyota) == FALSE &
+                                    is.na(Turf) &
+                                    is.na(`Pocillopora verrucosa`)  &
+                                    is.na(`Porites lobata`) ~ "Dictyota",
+                                  is.na(CCA)  & 
+                                    is.na(Dictyota) &
+                                    is.na(Turf) == FALSE &
+                                    is.na(`Pocillopora verrucosa`)  &
+                                    is.na(`Porites lobata`) ~ "Turf",
+                                  is.na(CCA) & 
+                                    is.na(Dictyota) &
+                                    is.na(Turf) &
+                                    is.na(`Pocillopora verrucosa`) == FALSE &
+                                    is.na(`Porites lobata`) ~ "Pocillopora verrucosa",
+                                  is.na(CCA) & 
+                                    is.na(Dictyota) &
+                                    is.na(Turf) &
+                                    is.na(`Pocillopora verrucosa`)  &
+                                    is.na(`Porites lobata`) == FALSE ~ "Porites lobata",
+                                  is.na(`Pocillopora verrucosa`) == FALSE &
+                                    is.na(CCA) == FALSE & 
+                                    is.na(Dictyota) &
+                                    is.na(Turf)  |
+                                    is.na(`Porites lobata`) == FALSE &
+                                    is.na(CCA) == FALSE &
+                                    is.na(Dictyota) &
+                                    is.na(Turf) ~ "Corraline",
+                                  is.na(`Pocillopora verrucosa`) &
+                                    is.na(CCA) == FALSE & 
+                                    is.na(Dictyota) == FALSE &
+                                    is.na(`Porites lobata`) |
+                                    is.na(CCA) == FALSE &
+                                    is.na(Turf) == FALSE &
+                                    is.na(`Porites lobata`) &
+                                    is.na(`Pocillopora verrucosa`) ~ "Algae",
+                                  is.na(`Dictyota`) &
+                                    is.na(CCA)  &
+                                    is.na(Turf) &
+                                    is.na(`Porites lobata`) == FALSE &
+                                    is.na(`Pocillopora verrucosa`) == FALSE ~ "Coral",
+                                  is.na(`Dictyota`) == FALSE &
+                                    is.na(CCA)  &
+                                    is.na(Turf) == FALSE &
+                                    is.na(`Porites lobata`) &
+                                    is.na(`Pocillopora verrucosa`) ~ "Fleshy Algae",
+                                  is.na(CCA)  & 
+                                    is.na(Dictyota) &
+                                    is.na(Turf) == FALSE &
+                                    is.na(`Pocillopora verrucosa`)  &
+                                    is.na(`Porites lobata`) ~ "Turf",
+                                  number_exudate_organisms > 3 ~ "Primary Producers",
+                                  TRUE ~ "Cosmo"))
 
 # GRAPHING —- PCoAs --------------------------------------
 dom_graphing <- dom_stats_wdf%>%
