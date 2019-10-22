@@ -2,6 +2,7 @@
 # Re-organization of DORCIERR_FCM_fDOM.R because it needs to be cleaner 07/15/2019
 # Only working on daytime exudation and remineralization
 # Rewritten with changes to RR3 starting pipeline 10/11/2019
+# 16s rRNA amplicon seque3nce data added in a upaded 10/18/2019
 
 # LOADING -- packages -------------------------------------------------------
 #Data mungering
@@ -24,11 +25,11 @@ library(RColorBrewer)
 
 # CORES -- setting processors available -----------------------------------
 ##Only used if future_mapping
-# num_cores <- availableCores() -6
+num_cores <- availableCores() -4
 # don't murder your compututer and save your self a core
 # this is the parellel planning step (changes global env so this is plan for all parellel 
 # work unless specificed otherwise)
-# plan(multiprocess, workers = num_cores) #defaults to sequential process, multiprocess is one option for parellel 
+plan(multiprocess, workers = num_cores) #defaults to sequential process, multiprocess is one option for parellel
 
 # LOADING -- dataframes  ------------------------------------------------------
 ## FCM and fDOM data
@@ -463,6 +464,16 @@ accumulites <-organism_exudates%>%
          difference_from_water > 0.00)
 
 
+# CLEANING -- microbe RA data  --------------------------------------------
+ra_bigger_TF <- microbe_combined%>%
+  dplyr::select(-c(reads, sum, asin, numOtus, sample_code))%>%
+  spread(Organism, ra)%>%
+  gather(Organism, ra, 13:17)%>%
+  mutate(difference = ra - `Water control`)%>%
+  filter(difference > 0)%>%
+  dplyr::select(c(DayNight, OFGO, Organism))
+    
+
 # PRE-STATS CLEAINING -- FCM Stats prep---------------------------------------------------------------------
 ## This should calculate mean cells per hour per µL for each organism
 ## Just looks at TF - mean(T0)
@@ -542,7 +553,7 @@ dom_stats_wdf<- dorc_wdf%>%
 
 # PRE-STATS CLEANING -- 16s -----------------------------------------------
 microbe_combined <- microbe_abundance_raw%>%
-  select(-1)%>%
+  dplyr::select(-1)%>%
   mutate(Group = case_when(Group == "Dorcierr_D_DT_1_TFD" ~ "D_DT_1_TFD",
                            Group == "DORCIERR_D_WA_2_TFN" ~ "D_WA_2_TFN",
                            Group == "D_PV_2_TFN_SA504_SC704" ~ "D_PV_2_TFN",
@@ -554,7 +565,7 @@ microbe_combined <- microbe_abundance_raw%>%
   rename(sample_code = Group)%>%
   gather(OTU, reads, 3:ncol(.))%>%
   left_join(., microbe_taxonomy, by = "OTU")%>%
-  select(-Size)%>%
+  dplyr::select(-Size)%>%
   separate(Taxonomy, c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "OTU"), sep = ";")%>%
   mutate(Class = case_when(Class %like any% c("%uncultured%", "%unclassified%", "%unidentified%") ~ "unclassified",
                                   TRUE ~ as.character(Class)),
@@ -666,7 +677,7 @@ aov_microbe <- microbe_combined%>%
                        tidy()%>%
                        filter(!term == "Residuals")%>%
                        dplyr::select(term, p.value)))%>%
-  select(-data)%>%
+  dplyr::select(-data)%>%
   unnest(anova)
 
 anova_microbe_pvalues <- aov_microbe%>%
@@ -816,7 +827,7 @@ dunnett_microbe_pvals <- mic_organism_post_hoc%>%
   group_by(DayNight, OFGO)%>%
   mutate(sum = sum(asin))%>%
   filter(sum != 0)%>%
-  select(-sum)%>%
+  dplyr::select(-sum)%>%
   mutate(Organism = factor(Organism))%>%
   mutate(Organism = fct_relevel(Organism, organism_order_micro))%>%
   nest()%>%
@@ -824,9 +835,9 @@ dunnett_microbe_pvals <- mic_organism_post_hoc%>%
                          glht(linfct = mcp(Organism = "Dunnett"))),
          dunnett_summary = map(dunnett, ~summary(.x)%>%
                                  tidy()))%>%
-  select(-c(data,dunnett))%>%
+  dplyr::select(-c(data,dunnett))%>%
   unnest(dunnett_summary)%>%
-  select(-c(4:7))%>%
+  dplyr::select(-c(4:7))%>%
   mutate(lhs = gsub(" - Water control", "", lhs))%>%
   rename("Organism" = "lhs")%>%
   mutate(FDR = p.adjust(p.value, method = "BH"))%>%
@@ -837,12 +848,12 @@ daynight_microbe_pvals <- mic_organism_post_hoc%>%
   group_by(Organism, OFGO)%>%
   mutate(sum = sum(asin))%>%
   filter(sum != 0)%>%
-  select(-sum)%>%
+  dplyr::select(-sum)%>%
   nest()%>%
   mutate(data = map(data, ~ aov(asin ~ DayNight, .x)%>%
                        tidy()))%>%
   unnest(data)%>%
-  select(-c(4:7))%>%
+  dplyr::select(-c(4:7))%>%
   filter(term != "Residuals")%>%
   mutate(FDR = p.adjust(p.value, method = "BH"))%>%
   filter(FDR < 0.05)
@@ -1041,7 +1052,7 @@ combined_labile_accumulites_compounds <- bind_rows(combined_accumulite_compounds
 
 # META-STATS -- microbes --------------------------------------------------
 dunnett_micro_analysis <- dunnett_microbe_pvals%>%
-  select(-p.value)%>%
+  dplyr::select(-p.value)%>%
   spread(Organism, FDR)%>%
   add_column(number_exudate_organisms = rowSums(.[3:ncol(.)] >= 0, na.rm = TRUE))%>%
   mutate(microbe_organism = case_when(is.na(CCA) == FALSE & 
@@ -1102,6 +1113,7 @@ dunnett_micro_analysis <- dunnett_microbe_pvals%>%
                                     is.na(`Porites lobata`) ~ "Turf",
                                   number_exudate_organisms > 3 ~ "Primary Producers",
                                   TRUE ~ "Cosmo"))
+
 
 # GRAPHING —- PCoAs --------------------------------------
 dom_graphing <- dom_stats_wdf%>%
@@ -1350,6 +1362,56 @@ labile_accumulite_RA_meta%>%
         ylab("Relative Abundance (percent)"))
 dev.off()
 
+
+
+# GRAPHING -- Significant microbes ----------------------------------------
+micro_sig_genera <- dunnett_micro_analysis%>%
+  group_by(microbe_organism)%>%
+  nest()%>%
+  mutate(data = map(data, ~ left_join(.x, microbe_combined, by = c("OFGO", "DayNight"), suffix = c("_x", "_y"))%>%
+                      inner_join(., ra_bigger_TF, by = c("OFGO", "DayNight", "Organism"))), 
+         plots = map(data, ~ ggplot(.x, aes(Organism, ra, fill = OFGO)) +
+                       geom_bar(stat = "summary", fun.y = "mean", position = "stack") +
+                       ggtitle(microbe_organism) +
+                       theme(
+                         axis.text.x = element_text(angle = 60, hjust = 1),
+                         panel.background = element_rect(fill = "transparent"), # bg of the panel
+                         plot.background = element_rect(fill = "transparent", color = NA), # bg of the plot
+                         panel.grid.major = element_blank(), # get rid of major grid
+                         panel.grid.minor = element_blank(), # get rid of minor grid
+                         legend.background = element_rect(fill = "transparent"), # get rid of legend bg
+                         legend.box.background = element_rect(fill = "transparent") # get rid of legend panel bg
+                       ) +
+                       facet_wrap(~ DayNight) +
+                       ylab("Relative Abundance")
+                       ))
+
+pdf("~/Documents/SDSU/DORCIERR/Datasets/staring_at_data/microbes.pdf", height = 5, width = 6)
+micro_sig_genera$plots
+dev.off()
+
+# sig_genera <- dunnett_micro_analysis%>%
+#   filter(microbe_organism != "Primary Producers",
+#          microbe_organism != "Corraline",
+#          microbe_organism != "Fleshy Algae",
+#          microbe_organism != "Cosmo")%>%
+#   rename(Organism = microbe_organism)%>%
+#   left_join(., microbe_combined, by = c("OFGO", "DayNight", "Organism"), suffix = c("_x", "_y"))%>%
+#   inner_join(., ra_bigger_TF, by = c("OFGO", "DayNight", "Organism"))%>%
+#   ggplot(., aes(Organism, ra, fill = OFGO)) +
+#   geom_bar(stat = "summary", fun.y = "mean", position = "stack") +
+#   theme(
+#     plot.margin = margin(2,.8,2,.8, "cm"),
+#     axis.text.x = element_text(angle = 60, hjust = 1),
+#     panel.background = element_rect(fill = "transparent"), # bg of the panel
+#     plot.background = element_rect(fill = "transparent", color = NA), # bg of the plot
+#     panel.grid.major = element_blank(), # get rid of major grid
+#     panel.grid.minor = element_blank(), # get rid of minor grid
+#     legend.background = element_rect(fill = "transparent"), # get rid of legend bg
+#     legend.box.background = element_rect(fill = "transparent") # get rid of legend panel bg
+#   ) +
+#   facet_wrap(~ DayNight) +
+#   ylab("Relative Abundance")
 
 # WRITING -- Dataframe for Cytoscape ------------------------------
 day_organism_mean <- feature_RA%>%
