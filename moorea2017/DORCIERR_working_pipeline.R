@@ -25,7 +25,7 @@ library(RColorBrewer)
 
 # CORES -- setting processors available -----------------------------------
 ##Only used if future_mapping
-num_cores <- availableCores() -4
+num_cores <- availableCores() -1
 # don't murder your compututer and save your self a core
 # this is the parellel planning step (changes global env so this is plan for all parellel 
 # work unless specificed otherwise)
@@ -168,7 +168,24 @@ networking <- metadata%>%
   dplyr::select(c(feature_number, network,combined_ID, binary_ID, 
                   canopus_annotation:CLASS_STRING, `characterization scores`, C:dG))%>%
   separate(CLASS_STRING, c("level 1", "level 2", "level 3",
-                           "level 4", "level 5", "level 6", "level 7", "level 8"), sep = ";")
+                           "level 4", "level 5", "level 6", "level 7", "level 8"), sep = ";")%>%
+  mutate(c_temp = case_when(C > 0 ~ "C",
+                            TRUE ~ "_"),
+         o_temp = case_when(O > 0 ~ "O",
+                            TRUE ~ "_"),
+         h_temp = case_when(H > 0 ~ "H",
+                            TRUE~ "_"),
+         n_temp = case_when(N > 0 ~ "N",
+                            TRUE ~ "_"),
+         p_temp = case_when(P > 0 ~ "P",
+                            TRUE ~ "_"),
+         s_temp = case_when(S > 0 ~ "S",
+                            TRUE ~ "_"))%>%
+  unite(simplified_makeup, c("c_temp", "h_temp", "o_temp", "n_temp", "p_temp", "s_temp"), sep = "")%>%
+  mutate(simplified_makeup = gsub("_","", simplified_makeup),
+         simplified_makeup = case_when(`characterization scores` != "Good" ~ "uncharacterized",
+                                       TRUE ~ as.character(simplified_makeup)))
+         
 
 ## making feature table so we can remove blanks
 # have to change the MS codes for sample codes
@@ -462,6 +479,32 @@ exudate <-organism_exudates%>%
 accumulites <-organism_exudates%>%
   filter(Timepoint == "TF",
          difference_from_water > 0.00)
+
+
+# CLEANING -- feature ra data for graphing --------------------------------
+feature_ra <- dorcierr_features_wdf%>%
+  dplyr::select(c(feature_number, ends_with("_RA")))%>%
+  gather(sample_ID, ra, 2:ncol(.))%>%
+  mutate(sample_ID = gsub("_RA", "", sample_ID))%>%
+  mutate(sample_ID = gsub("-", "_", sample_ID))%>%
+  separate(sample_ID, c("Experiment", "Organism", "Replicate", "Timepoint"), sep = "_")%>%
+  filter(!Experiment %like% "%Blank%",
+         !Organism %like% "%Blank",
+         !Timepoint == "T0")%>%
+  dplyr::mutate(Experiment = case_when(Experiment == "D" ~ "dorcierr",
+                                       Experiment == "M" ~ "mordor",
+                                       Experiment == "R" ~ "RR3",
+                                       TRUE ~ as.character(Experiment)))%>%
+  dplyr::mutate(Organism = case_when(Organism == "CC" ~ "CCA",
+                                     Organism == "DT" ~ "Dictyota",
+                                     Organism == "PL" ~ "Porites lobata",
+                                     Organism == "PV" ~ "Pocillopora verrucosa",
+                                     Organism == "TR" ~ "Turf",
+                                     Organism == "WA" ~ "Water control",
+                                     TRUE ~ as.character(Organism)))%>%
+  separate(Timepoint, c("Timepoint", "DayNight"), sep = 2)%>%
+  mutate(DayNight = case_when(DayNight == "D" ~ "Day",
+                              TRUE ~ "Night"))
 
 
 # CLEANING -- microbe RA data  --------------------------------------------
@@ -778,9 +821,9 @@ org_dunnetts_exudates <- dom_organism_post_hoc%>%
   mutate(dunnett = map(data, ~ aov(asin ~ Organism, .x)%>%
                          glht(linfct = mcp(Organism = "Dunnett"))),
          dunnett_summary = map(dunnett, ~summary(.x)%>%
-                                 tidy()),
-         tukey = map(data, ~ aov(asin ~ Organism, .x)
-                     glht(linfct = mcp(Tension = "Tukey"))))
+                                 tidy()))
+         # tukey = map(data, ~ aov(asin ~ Organism, .x)%>%
+         #             glht(linfct = mcp(Tension = "Tukey"))))
 
 ##Doing future_mapping across processors. Seems to take longer when you have a lot of map functions.
 # org_dunnetts_exudates <- dom_organism_post_hoc%>%
@@ -1115,6 +1158,10 @@ dunnett_micro_analysis <- dunnett_microbe_pvals%>%
                                   TRUE ~ "Cosmo"))
 
 
+
+# META-STATS -- correlation matrix ----------------------------------------
+
+
 # GRAPHING —- PCoAs --------------------------------------
 dom_graphing <- dom_stats_wdf%>%
   spread(6,7)
@@ -1233,19 +1280,14 @@ ggplot(net141_networking, aes(x = reorder(Organism, - RA), y= (RA*100), fill = `
 dev.off()
 
 # GRAPHING -- relative abundances of labile exudates ---------------------
-labile_compound <- as.vector(combined_labile_compounds$feature_number)
-
-labile_RA <- feature_RA%>%
-  dplyr::select(c(1:5, labile_compound))%>%
-  gather(feature_number, RA, 6:ncol(.))%>%
-  filter(DayNight == "Day")
-
-
-labile_RA_meta <- left_join(labile_RA, combined_labile_compounds%>%
-                              dplyr::select(1:28, tag), by = "feature_number")%>%
-  filter(!tag == "algae_labile",
-         !tag == "fleshy_labile",
-         !tag == "primaryproducers_labile")%>%
+labile_RA <- feature_ra%>%
+  left_join(combined_labile_compounds%>%
+              rename(Organism = exudate_type)%>%
+              filter(number_exudate_organisms == 1),
+            ., by = c("feature_number", "DayNight", "Organism"))%>%
+  left_join(., networking%>%
+              dplyr::select(c(feature_number, simplified_makeup)), by = "feature_number")%>%
+  filter(Timepoint == "T0")%>%
   rename(`chemical composition` = simplified_makeup)%>%
   add_column(color = .$`chemical composition`)%>%
   mutate(color = case_when(color == "CHO" ~ "darkblue",
@@ -1254,26 +1296,25 @@ labile_RA_meta <- left_join(labile_RA, combined_labile_compounds%>%
                            color == "CHNP" ~ "#9EBE91",
                            color == "CHONP" ~ "#D1C74C",
                            color == "CHOP" ~ "#E4B80E",
-                           color == "" ~ "#F21A00",
+                           color == "uncharacterized" ~ "#F21A00",
                            color == "CH" ~ "#E67D00",
+                           color == "CHOS" ~ "red2",
+                           color == "CHONS" ~ "red1",
                            TRUE ~ as.character(color)),
-         Timepoint = case_when(Timepoint == "T0" ~ "Exudate",
-                               Timepoint == "TF" ~ "Microbial accumulite"))
+         Timepoint = case_when(Timepoint == "T0" ~ "Exudate"))
 
-labile_RA_meta$`chemical composition` <- factor(labile_RA_meta$`chemical composition`, 
+labile_RA$`chemical composition` <- factor(labile_RA$`chemical composition`, 
                                                 levels = c("", "CH", "CHOP", "CHONP", "CHNP", "CHON", "CHN", "CHO"))
 
-lcolors <- labile_RA_meta$color
+lcolors <- labile_RA$color
 
-names(lcolors) <- labile_RA_meta$`chemical composition`
+names(lcolors) <- labile_RA$`chemical composition`
 
-pdf("all_plots_test.pdf")
-labile_RA_meta%>%
-  split(list(.$tag))%>%
-  map(~ggplot(., aes(x = Organism, y= (RA*100), fill = `chemical composition`)) +
-        geom_bar(stat = "summary", fun.y = "sum") +
+pdf("labile_compound_composition.pdf")
+labile_RA%>%
+  ggplot(., aes(x = Organism, y= (ra*100))) +
+        geom_bar(aes(fill = `chemical composition`), stat = "summary", fun.y = "sum", position = "stack") +
         scale_fill_manual(values= lcolors)+
-        ggtitle(unique(.$tag)) +
         theme(
           axis.text.x = element_text(angle = 60, hjust = 1),
           panel.background = element_rect(fill = "transparent"), # bg of the panel
@@ -1283,9 +1324,9 @@ labile_RA_meta%>%
           legend.background = element_rect(fill = "transparent"), # get rid of legend bg
           legend.box.background = element_rect(fill = "transparent") # get rid of legend panel bg
         ) +
-        facet_wrap(~Timepoint) +
-        xlab("Canopus Level 3") + 
-        ylab("Relative Abundance (percent)"))
+        facet_wrap(~DayNight) +
+        xlab("Organism") + 
+        ylab("Relative Abundance (percent)")
 dev.off()
 
 
