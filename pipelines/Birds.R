@@ -21,6 +21,7 @@ reads <- files%>%
 
 vis_model <-reads%>%
   future_map(~ gather(., code, values, 2:ncol(.))%>%
+               mutate(values = abs(values))%>%
                separate(code, c("patch", "speices_code"), sep = "_")%>%
                mutate(patch = case_when(patch == "Ventrail.tail" ~ "Ventral.tail",
                                         patch == "Undertail" ~ "Ventral.tail",
@@ -31,36 +32,16 @@ vis_model <-reads%>%
                                         patch == "FediuF.Coverts" ~ "Medium.Coverts",
                                         patch == "Mante.2" ~ "Mantle.2",
                                         patch == "RuFp" ~ "Rump",
-                                        TRUE ~ as.character(patch)))%>%
+                                        TRUE ~ as.character(patch)),
+                      speices_code = case_when(speices_code == "GranSalF" ~ "GranSelF",
+                                               TRUE ~ as.character(speices_code)))%>%
                separate(speices_code, c("species", "sex"), sep = -1)%>%
                spread(patch, values)%>%
                group_by(species, sex)%>%
                nest())%>%
   reduce(bind_rows)%>%
   mutate(data = future_map(data, ~ as.data.frame(.x)%>%
-                      vismodel(visual = "avg.uv", achromatic = "bt.dc")))
-  
+                                 vismodel(., visual = "avg.uv", achromatic = "bt.dc")))%>%
+  unnest(data)
 
-
-
-
-# filenames <- list.files(path=getwd(),pattern="*.csv") 
-# numfiles <- length(filenames)  
-# datalist = list()
-# 
-# for (i in c(1:numfiles)){
-#   tryCatch({
-#     print(filenames[i])
-#     refs <- read.csv(filenames[i], header=TRUE)
-#     vismod1 <- vismodel(refs,   visual = "avg.uv", achromatic = "bt.dc")
-#     datalist[[i]] <- vismod1},
-#     error = function(err) {
-#       
-#       print(paste("Didn't work:  ",filenames[i]))
-#       
-#     },
-#     warning = function(warn) {}, finally = {}
-#   )
-# }
-# data <- do.call(rbind, datalist)
-# write.csv(data, file = "quatnum.csv")
+write_csv(vis_model, "quatnum.dat")
