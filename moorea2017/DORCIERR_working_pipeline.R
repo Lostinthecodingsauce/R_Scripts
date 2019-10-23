@@ -184,6 +184,7 @@ networking <- metadata%>%
   unite(simplified_makeup, c("c_temp", "h_temp", "o_temp", "n_temp", "p_temp", "s_temp"), sep = "")%>%
   mutate(simplified_makeup = gsub("_","", simplified_makeup),
          simplified_makeup = case_when(`characterization scores` != "Good" ~ "uncharacterized",
+                                       simplified_makeup == "" ~ "uncharacterized",
                                        TRUE ~ as.character(simplified_makeup)))
          
 
@@ -1298,36 +1299,42 @@ labile_RA <- feature_ra%>%
                            color == "CHOP" ~ "#E4B80E",
                            color == "uncharacterized" ~ "#F21A00",
                            color == "CH" ~ "#E67D00",
-                           color == "CHOS" ~ "red2",
-                           color == "CHONS" ~ "red1",
+                           color == "CHOS" ~ "goldenrod3",
+                           color == "CHONS" ~ "goldenrod4",
+                           is.na(color) ~ "red",
                            TRUE ~ as.character(color)),
          Timepoint = case_when(Timepoint == "T0" ~ "Exudate"))
 
 labile_RA$`chemical composition` <- factor(labile_RA$`chemical composition`, 
-                                                levels = c("", "CH", "CHOP", "CHONP", "CHNP", "CHON", "CHN", "CHO"))
+                                                levels = c("", "CH", "CHOP", "CHONP", 
+                                                           "CHNP", "CHON", "CHN", "CHO", "CHOS", 
+                                                           "CHONS", "uncharacterized"))
 
 lcolors <- labile_RA$color
 
 names(lcolors) <- labile_RA$`chemical composition`
 
-pdf("labile_compound_composition.pdf")
+
+# pdf("labile_compound_composition.pdf")
 labile_RA%>%
   ggplot(., aes(x = Organism, y= (ra*100))) +
-        geom_bar(aes(fill = `chemical composition`), stat = "summary", fun.y = "sum", position = "stack") +
-        scale_fill_manual(values= lcolors)+
-        theme(
-          axis.text.x = element_text(angle = 60, hjust = 1),
-          panel.background = element_rect(fill = "transparent"), # bg of the panel
-          plot.background = element_rect(fill = "transparent", color = NA), # bg of the plot
-          panel.grid.major = element_blank(), # get rid of major grid
-          panel.grid.minor = element_blank(), # get rid of minor grid
-          legend.background = element_rect(fill = "transparent"), # get rid of legend bg
-          legend.box.background = element_rect(fill = "transparent") # get rid of legend panel bg
-        ) +
-        facet_wrap(~DayNight) +
-        xlab("Organism") + 
-        ylab("Relative Abundance (percent)")
-dev.off()
+  geom_bar(aes(fill = `chemical composition`), stat = "summary", fun.y = "sum", position = "stack") +
+  scale_fill_manual(values= lcolors) +
+  scale_y_continuous(limits = c(0,17.5), breaks= c(2.5, 5, 7.5, 10, 12.5, 15, 17.5)) +
+theme(
+  axis.text.x = element_text(angle = 60, hjust = 1),
+  panel.background = element_rect(fill = "transparent"), # bg of the panel
+  plot.background = element_rect(fill = "transparent", color = NA), # bg of the plot
+  panel.grid.major.x = element_blank(), # get rid of major grid
+  panel.grid.major.y = element_line(colour = "grey"),
+  panel.grid.minor = element_blank(), # get rid of minor grid
+  legend.background = element_rect(fill = "transparent"), # get rid of legend bg
+  legend.box.background = element_rect(fill = "transparent") # get rid of legend panel bg
+) +
+  facet_wrap(~DayNight) +
+  xlab("Organism") + 
+  ylab("Relative Abundance (percent)")
+# dev.off()
 
 
 # GRAPHING -- Labile accummulite ------------------------------------------
@@ -1431,28 +1438,32 @@ pdf("~/Documents/SDSU/DORCIERR/Datasets/staring_at_data/microbes.pdf", height = 
 micro_sig_genera$plots
 dev.off()
 
-# sig_genera <- dunnett_micro_analysis%>%
-#   filter(microbe_organism != "Primary Producers",
-#          microbe_organism != "Corraline",
-#          microbe_organism != "Fleshy Algae",
-#          microbe_organism != "Cosmo")%>%
-#   rename(Organism = microbe_organism)%>%
-#   left_join(., microbe_combined, by = c("OFGO", "DayNight", "Organism"), suffix = c("_x", "_y"))%>%
-#   inner_join(., ra_bigger_TF, by = c("OFGO", "DayNight", "Organism"))%>%
-#   ggplot(., aes(Organism, ra, fill = OFGO)) +
-#   geom_bar(stat = "summary", fun.y = "mean", position = "stack") +
-#   theme(
-#     plot.margin = margin(2,.8,2,.8, "cm"),
-#     axis.text.x = element_text(angle = 60, hjust = 1),
-#     panel.background = element_rect(fill = "transparent"), # bg of the panel
-#     plot.background = element_rect(fill = "transparent", color = NA), # bg of the plot
-#     panel.grid.major = element_blank(), # get rid of major grid
-#     panel.grid.minor = element_blank(), # get rid of minor grid
-#     legend.background = element_rect(fill = "transparent"), # get rid of legend bg
-#     legend.box.background = element_rect(fill = "transparent") # get rid of legend panel bg
-#   ) +
-#   facet_wrap(~ DayNight) +
-#   ylab("Relative Abundance")
+sig_genera <- dunnett_micro_analysis%>%
+  filter(microbe_organism != "Primary Producers",
+         microbe_organism != "Corraline",
+         microbe_organism != "Fleshy Algae",
+         microbe_organism != "Cosmo")%>%
+  rename(Organism = microbe_organism)%>%
+  left_join(., microbe_combined, by = c("OFGO", "DayNight", "Organism"), suffix = c("_x", "_y"))%>%
+  inner_join(., ra_bigger_TF, by = c("OFGO", "DayNight", "Organism"))%>%
+  separate(OFGO, c("Order", "Family", "Genus", "Species"), sep =";")%>%
+  unite(genera, c("Family", "Genus"), sep = " ")%>%
+  ggplot(., aes(Organism, ra, fill = genera)) +
+  geom_bar(stat = "summary", fun.y = "mean", position = "stack") +
+  theme(
+    plot.margin = margin(2,.8,2,.8, "cm"),
+    axis.text.x = element_text(angle = 60, hjust = 1),
+    panel.background = element_rect(fill = "transparent"), # bg of the panel
+    plot.background = element_rect(fill = "transparent", color = NA), # bg of the plot
+    panel.grid.major = element_blank(), # get rid of major grid
+    panel.grid.minor = element_blank(), # get rid of minor grid
+    legend.background = element_rect(fill = "transparent"), # get rid of legend bg
+    legend.box.background = element_rect(fill = "transparent") # get rid of legend panel bg
+  ) +
+  facet_wrap(~ DayNight) +
+  ylab("Relative Abundance")
+
+sig_genera
 
 # WRITING -- Dataframe for Cytoscape ------------------------------
 day_organism_mean <- feature_RA%>%
