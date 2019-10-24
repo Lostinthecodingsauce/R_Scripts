@@ -1438,7 +1438,8 @@ pdf("~/Documents/SDSU/DORCIERR/Datasets/staring_at_data/microbes.pdf", height = 
 micro_sig_genera$plots
 dev.off()
 
-sig_genera <- dunnett_micro_analysis%>%
+pdf("sig_microbes.pdf", height = 5, width = 4)
+dunnett_micro_analysis%>%
   filter(microbe_organism != "Primary Producers",
          microbe_organism != "Corraline",
          microbe_organism != "Fleshy Algae",
@@ -1451,6 +1452,7 @@ sig_genera <- dunnett_micro_analysis%>%
   ggplot(., aes(Organism, ra, fill = genera)) +
   geom_bar(stat = "summary", fun.y = "mean", position = "stack") +
   theme(
+    # legend.position = "none",
     plot.margin = margin(2,.8,2,.8, "cm"),
     axis.text.x = element_text(angle = 60, hjust = 1),
     panel.background = element_rect(fill = "transparent"), # bg of the panel
@@ -1462,8 +1464,16 @@ sig_genera <- dunnett_micro_analysis%>%
   ) +
   facet_wrap(~ DayNight) +
   ylab("Relative Abundance")
+dev.off()
 
-sig_genera
+sig_genera <- dunnett_micro_analysis%>%
+  filter(microbe_organism != "Primary Producers",
+         microbe_organism != "Corraline",
+         microbe_organism != "Fleshy Algae",
+         microbe_organism != "Cosmo")%>%
+  rename(Organism = microbe_organism)%>%
+  left_join(., microbe_combined, by = c("OFGO", "DayNight", "Organism"), suffix = c("_x", "_y"))%>%
+  inner_join(., ra_bigger_TF, by = c("OFGO", "DayNight", "Organism"))
 
 # WRITING -- Dataframe for Cytoscape ------------------------------
 day_organism_mean <- feature_RA%>%

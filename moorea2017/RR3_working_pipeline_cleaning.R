@@ -11,6 +11,7 @@ library(DescTools)
 library(broom)
 library(readxl)
 library(CHNOSZ)
+library(mosaic)
 
 #PCoA, PERMANOVA
 library(vegan)
@@ -385,6 +386,45 @@ exudate_table_wdf <- left_join(exudate_table_wdf_temp, carbon_normalized_NOSC, b
 
 write_csv(exudate_table_wdf, "RR3_feature_table_master_post_filtered.csv")
 
+
+# PRE-CLEANING -- Relative abundance --------------------------------------
+rr3_transposed_xic <- exudate_table_wdf%>%
+  filter(exudate_behavior == "exudate")%>%
+  dplyr::select(c(feature_number, ends_with("_xic")))%>%
+  gather(sample_ID, xic, 2:ncol(.))%>%
+  mutate(sample_ID = gsub("_asin", "", sample_ID),
+         sample_ID = gsub("-", "_", sample_ID))%>%
+  separate(sample_ID, c("Experiment", "Organism", "Replicate", "Timepoint"), sep = "_")%>%
+  filter(!Experiment %like% "%Blank%",
+         !Organism %like% "%Blank")%>%
+  dplyr::mutate(Experiment = case_when(Experiment == "D" ~ "dorcierr",
+                                       Experiment == "M" ~ "mordor",
+                                       Experiment == "R" ~ "RR3",
+                                       TRUE ~ as.character(Experiment)))%>%
+  dplyr::mutate(Organism = case_when(Organism == "CC" ~ "CCA",
+                                     Organism == "DT" ~ "Dictyota",
+                                     Organism == "PL" ~ "Porites lobata",
+                                     Organism == "PV" ~ "Pocillopora verrucosa",
+                                     Organism == "TR" ~ "Turf",
+                                     Organism == "WA" ~ "Water control",
+                                     TRUE ~ as.character(Organism)))%>%
+  separate(Timepoint, c("Timepoint", "DayNight"), sep = 2)%>%
+  mutate(DayNight = case_when(DayNight == "D" ~ "Day",
+                              TRUE ~ "Night"))%>%
+  filter(Timepoint != "T0")%>%
+  group_by(Organism, Timepoint, DayNight, feature_number)%>%
+  dplyr::select(-Replicate)%>%
+  summarize_if(is.numeric, mean)%>%
+  spread(Organism, xic)%>%
+  gather(Organism, xic, 4:8)%>%
+  mutate(difference = xic - `Water control`)%>%
+  ungroup()
+
+higher_than_water <- rr3_transposed_xic%>%
+  filter(difference > 0)%>%
+  dplyr::select(c(feature_number, DayNight, Organism))
+
+
 # PRE-CLEANING -- Making Mo’orea working data frame for stats -----------------------------
 rr3_transposed <- exudate_table_wdf%>%
   filter(exudate_behavior == "exudate")%>%
@@ -483,11 +523,15 @@ dunnets_pvalues <- rr3_organism_post_hoc%>%
   unnest(dunnett_summary)%>%
   add_column(FDR = p.adjust(.$p.value, method = "BH"))%>%
   filter(FDR < 0.05)%>%
-  mutate(lhs = gsub(" - Water control", "_dunnetts", lhs))%>%
+  mutate(lhs = gsub(" - Water control", "", lhs))%>%
   dplyr::select(c(1,2,"lhs", "FDR"))%>%
-  arrange(lhs)%>%
+  rename(Organism = lhs)%>%
+  inner_join(., higher_than_water, by = c("Organism", "DayNight", "feature_number"))%>%
+  mutate(dunnett = "_dunnetts")%>%
+  unite(Organism, c("Organism", "dunnett"), sep = "")%>%
+  arrange(Organism)%>%
   group_by(DayNight)%>%
-  spread(lhs, FDR)%>%
+  spread(Organism, FDR)%>%
   ungroup()%>%
   group_by(DayNight, feature_number)%>%
   add_column(number_exudate_organisms = rowSums(.[3:ncol(.)] >= 0, na.rm = TRUE))%>%
