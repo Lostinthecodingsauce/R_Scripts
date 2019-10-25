@@ -19,6 +19,8 @@ files <- dir(pattern = "*.csv")
 reads <- files%>%
   purrr::map(read_csv)
 
+overlap_patches <- c("back", "Mantle", "etc.")
+
 vis_model <-reads%>%
   future_map(~ gather(., code, values, 2:ncol(.))%>%
                mutate(values = abs(values))%>%
@@ -35,6 +37,7 @@ vis_model <-reads%>%
                                         TRUE ~ as.character(patch)),
                       speices_code = case_when(speices_code == "GranSalF" ~ "GranSelF",
                                                TRUE ~ as.character(speices_code)))%>%
+               dplyr::select(c(wl, overlap_patches))%>%
                separate(speices_code, c("species", "sex"), sep = -1)%>%
                spread(patch, values)%>%
                group_by(species, sex)%>%
