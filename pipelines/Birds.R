@@ -1,3 +1,7 @@
+## Analyzing patch variability using vis_model
+## written by Zach Quinlan for Ben Scott
+## 10/22/2019
+
 # READING -- libraries ------------------------------------------------------
 library(tidyverse)
 library(pavo)
