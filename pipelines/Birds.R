@@ -24,6 +24,8 @@ reads <- files%>%
   purrr::map(read_csv)
 
 overlap_patches <- c("back", "Mantle", "etc.")
+overlap_patches <- c(Crown,Auriculars,Nape,Mantle,Back,Rump,Dorsal.tail,Throat,Breast,Side,Belly,Undertail.coverts,Scapulars,Medium.Coverts,Greater.Coverts,Primaries,Secondaires)
+
 
 vis_model <-reads%>%
   future_map(~ gather(., code, values, 2:ncol(.))%>%
